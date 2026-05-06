@@ -183,7 +183,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Alert feed — takes 2 cols */}
           <div className="lg:col-span-2 h-96">
-            <AlertFeed alerts={alerts} />
+            <AlertFeed alerts={alerts} history={history} />
           </div>
 
           {/* Right panel */}
