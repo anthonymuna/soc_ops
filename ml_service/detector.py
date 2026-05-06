@@ -1,8 +1,9 @@
 """
-Hybrid anomaly detection:
-  1. XGBoost trained on NSL-KDD full 41 features (supervised, known attack classification)
-  2. IsolationForest (unsupervised, zero-day / unknown anomalies)
-NSL-KDD downloads automatically on first train — no manual setup needed.
+Hybrid detection pipeline:
+  1. RandomForest on NSL-KDD (supervised — attack family classification)
+  2. Supervised classifier on labeled live logs (uses threat_category label from ES)
+  3. Zero-shot NLI classifier via HuggingFace (no training, no fine-tuning)
+  4. IsolationForest fallback (unsupervised baseline)
 """
 
 import os
@@ -13,24 +14,23 @@ from pathlib import Path
 
 import numpy as np
 import joblib
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import IsolationForest, RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
 
 MODEL_PATH        = Path("/app/models/detector.pkl")
 NSL_KDD_PATH      = Path("/app/models/nsl_kdd_train.csv")
 NSL_KDD_TEST_PATH = Path("/app/models/nsl_kdd_test.csv")
 CONTAMINATION     = float(os.getenv("CONTAMINATION", "0.05"))
+HF_MODEL          = os.getenv("HF_ZS_MODEL", "cross-encoder/nli-MiniLM2-L6-H768")
+USE_ZS_CLASSIFIER = os.getenv("USE_ZS_CLASSIFIER", "true").lower() == "true"
 
-# NSL-KDD public mirrors (GitHub)
 NSL_KDD_URL      = "https://raw.githubusercontent.com/defcom17/NSL_KDD/master/KDDTrain+.txt"
 NSL_KDD_TEST_URL = "https://raw.githubusercontent.com/defcom17/NSL_KDD/master/KDDTest+.txt"
 
 logger = logging.getLogger("detector")
 
-# NSL-KDD has 41 features + label + difficulty
 NSL_KDD_COLS = [
     "duration", "protocol_type", "service", "flag", "src_bytes", "dst_bytes",
     "land", "wrong_fragment", "urgent", "hot", "num_failed_logins", "logged_in",
@@ -46,21 +46,51 @@ NSL_KDD_COLS = [
 
 ATTACK_FAMILIES = {
     "normal": "normal",
-    # DoS
     "back": "dos", "land": "dos", "neptune": "dos", "pod": "dos",
     "smurf": "dos", "teardrop": "dos", "mailbomb": "dos",
     "apache2": "dos", "processtable": "dos", "udpstorm": "dos",
-    # Probe
     "ipsweep": "probe", "nmap": "probe", "portsweep": "probe", "satan": "probe",
     "mscan": "probe", "saint": "probe",
-    # R2L
     "ftp_write": "r2l", "guess_passwd": "r2l", "imap": "r2l", "multihop": "r2l",
     "phf": "r2l", "spy": "r2l", "warezclient": "r2l", "warezmaster": "r2l",
     "sendmail": "r2l", "named": "r2l", "snmpgetattack": "r2l", "snmpguess": "r2l",
     "xlock": "r2l", "xsnoop": "r2l", "httptunnel": "r2l",
-    # U2R
     "buffer_overflow": "u2r", "loadmodule": "u2r", "perl": "u2r", "rootkit": "u2r",
     "ps": "u2r", "sqlattack": "u2r", "xterm": "u2r",
+}
+
+# Mapping from threat_category field in ES logs → attack family
+THREAT_CAT_MAP = {
+    "normal": "normal",
+    "dos": "dos", "ddos": "dos",
+    "probe": "probe", "recon": "probe", "port_scan": "probe",
+    "brute_force": "r2l", "r2l": "r2l", "lateral_movement": "r2l",
+    "c2": "u2r", "c2_beacon": "u2r", "privesc": "u2r",
+    "data_exfil": "u2r", "exfil": "u2r",
+    "u2r": "u2r",
+}
+
+# Attack labels for zero-shot classifier
+ZS_LABELS = [
+    "normal network traffic",
+    "denial of service attack",
+    "network port scanning",
+    "brute force authentication attack",
+    "command and control beaconing",
+    "data exfiltration",
+    "lateral movement",
+    "privilege escalation",
+]
+
+ZS_LABEL_TO_CLASS = {
+    "normal network traffic": "normal",
+    "denial of service attack": "dos",
+    "network port scanning": "probe",
+    "brute force authentication attack": "r2l",
+    "command and control beaconing": "u2r",
+    "data exfiltration": "u2r",
+    "lateral movement": "r2l",
+    "privilege escalation": "u2r",
 }
 
 FEATURE_NAMES = [
@@ -79,39 +109,23 @@ EVENT_TYPE_MAP = {
 
 PROTOCOL_MAP = {"tcp": 0, "udp": 1, "icmp": 2, "other": 3}
 
-PRIVATE_RANGES = [
-    (167772160, 184549375),
-    (2886729728, 2887778303),
-    (3232235520, 3232301055),
-]
+PRIVATE_PREFIXES = (
+    "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
+    "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+    "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+    "127.", "::1",
+)
 
 CLASS_LABELS = ["normal", "dos", "probe", "r2l", "u2r", "unknown_anomaly"]
 SEV_MAP = {
-    "normal": "info",
-    "dos": "critical",
-    "probe": "medium",
-    "r2l": "high",
-    "u2r": "critical",
-    "unknown_anomaly": "high",
+    "normal": "info", "dos": "critical", "probe": "medium",
+    "r2l": "high", "u2r": "critical", "unknown_anomaly": "high",
 }
 
 
-def _ip_to_int(ip: str) -> int:
-    try:
-        parts = str(ip).split(".")
-        return sum(int(p) << (24 - 8 * i) for i, p in enumerate(parts))
-    except Exception:
-        return 0
-
-
 def _is_external(ip: str) -> int:
-    n = _ip_to_int(ip)
-    if n == 0:
-        return 0
-    for s, e in PRIVATE_RANGES:
-        if s <= n <= e:
-            return 0
-    return 1
+    s = str(ip)
+    return 0 if any(s.startswith(p) for p in PRIVATE_PREFIXES) else 1
 
 
 def _download_file(url: str, dest: Path) -> bool:
@@ -130,12 +144,10 @@ def _download_file(url: str, dest: Path) -> bool:
         return False
 
 
-def _parse_nsl_kdd_raw(path: Path) -> tuple[np.ndarray, list[str]] | None:
-    """Parse NSL-KDD file → (X features, y string labels). Shared by train + eval."""
+def _parse_nsl_kdd_raw(path: Path):
     try:
         X_rows, y_rows = [], []
         cat_cols: dict[str, dict] = {"protocol_type": {}, "service": {}, "flag": {}}
-
         with open(path) as f:
             for line in f:
                 parts = line.strip().split(",")
@@ -147,66 +159,41 @@ def _parse_nsl_kdd_raw(path: Path) -> tuple[np.ndarray, list[str]] | None:
                     if v not in enc:
                         enc[v] = len(enc)
                     row[col] = enc[v]
+                features = [float(row[c]) if c not in cat_cols else row[c]
+                            for c in list(cat_cols.keys())]
                 features = [
-                    # Basic (4)
-                    float(row["duration"]),
-                    float(row["protocol_type"]),
-                    float(row["service"]),
-                    float(row["flag"]),
-                    # Traffic (6)
-                    min(float(row["src_bytes"]), 1e7),
-                    min(float(row["dst_bytes"]), 1e7),
-                    float(row["land"]),
-                    float(row["wrong_fragment"]),
-                    float(row["urgent"]),
-                    float(row["hot"]),
-                    # Login/access (12)
-                    float(row["num_failed_logins"]),
-                    float(row["logged_in"]),
-                    float(row["num_compromised"]),
-                    float(row["root_shell"]),
-                    float(row["su_attempted"]),
-                    float(row["num_root"]),
-                    float(row["num_file_creations"]),
-                    float(row["num_shells"]),
-                    float(row["num_access_files"]),
-                    float(row["num_outbound_cmds"]),
-                    float(row["is_host_login"]),
-                    float(row["is_guest_login"]),
-                    # Traffic stats (10)
-                    float(row["count"]),
-                    float(row["srv_count"]),
-                    float(row["serror_rate"]),
-                    float(row["srv_serror_rate"]),
-                    float(row["rerror_rate"]),
-                    float(row["srv_rerror_rate"]),
-                    float(row["same_srv_rate"]),
-                    float(row["diff_srv_rate"]),
-                    float(row["srv_diff_host_rate"]),
-                    # Host-based stats (9)
-                    float(row["dst_host_count"]),
-                    float(row["dst_host_srv_count"]),
-                    float(row["dst_host_same_srv_rate"]),
-                    float(row["dst_host_diff_srv_rate"]),
-                    float(row["dst_host_same_src_port_rate"]),
-                    float(row["dst_host_srv_diff_host_rate"]),
-                    float(row["dst_host_serror_rate"]),
-                    float(row["dst_host_srv_serror_rate"]),
-                    float(row["dst_host_rerror_rate"]),
+                    float(row["duration"]), float(row["protocol_type"]),
+                    float(row["service"]), float(row["flag"]),
+                    min(float(row["src_bytes"]), 1e7), min(float(row["dst_bytes"]), 1e7),
+                    float(row["land"]), float(row["wrong_fragment"]), float(row["urgent"]),
+                    float(row["hot"]), float(row["num_failed_logins"]), float(row["logged_in"]),
+                    float(row["num_compromised"]), float(row["root_shell"]),
+                    float(row["su_attempted"]), float(row["num_root"]),
+                    float(row["num_file_creations"]), float(row["num_shells"]),
+                    float(row["num_access_files"]), float(row["num_outbound_cmds"]),
+                    float(row["is_host_login"]), float(row["is_guest_login"]),
+                    float(row["count"]), float(row["srv_count"]),
+                    float(row["serror_rate"]), float(row["srv_serror_rate"]),
+                    float(row["rerror_rate"]), float(row["srv_rerror_rate"]),
+                    float(row["same_srv_rate"]), float(row["diff_srv_rate"]),
+                    float(row["srv_diff_host_rate"]), float(row["dst_host_count"]),
+                    float(row["dst_host_srv_count"]), float(row["dst_host_same_srv_rate"]),
+                    float(row["dst_host_diff_srv_rate"]), float(row["dst_host_same_src_port_rate"]),
+                    float(row["dst_host_srv_diff_host_rate"]), float(row["dst_host_serror_rate"]),
+                    float(row["dst_host_srv_serror_rate"]), float(row["dst_host_rerror_rate"]),
                     float(row["dst_host_srv_rerror_rate"]),
                 ]
                 label_raw = row["label"].strip().rstrip(".")
                 label = ATTACK_FAMILIES.get(label_raw.lower(), "u2r")
                 X_rows.append(features)
                 y_rows.append(label)
-
         return np.array(X_rows, dtype=np.float32), y_rows
     except Exception as e:
         logger.error(f"NSL-KDD parse error {path}: {e}")
         return None
 
 
-def _load_nsl_kdd() -> tuple[np.ndarray, np.ndarray, list[str]] | None:
+def _load_nsl_kdd():
     if not _download_file(NSL_KDD_URL, NSL_KDD_PATH):
         return None
     result = _parse_nsl_kdd_raw(NSL_KDD_PATH)
@@ -241,49 +228,172 @@ def extract_features(logs: list[dict]) -> np.ndarray:
     return np.array(rows, dtype=np.float32)
 
 
+def log_to_text(log: dict) -> str:
+    """Convert log dict to natural language for zero-shot NLI classifier."""
+    parts = []
+    et = log.get("event_type", "")
+    if et:
+        parts.append(et.replace("_", " "))
+    proto = log.get("protocol", "")
+    if proto:
+        parts.append(f"{proto} traffic")
+    src = log.get("src_ip", "")
+    dst = log.get("dst_ip", "")
+    if src and dst:
+        src_ext = _is_external(src)
+        dst_ext = _is_external(dst)
+        parts.append(f"from {'external' if src_ext else 'internal'} host {src}")
+        parts.append(f"to {'external' if dst_ext else 'internal'} host {dst}")
+    port = log.get("dst_port", 0)
+    if port:
+        parts.append(f"port {port}")
+    b = int(log.get("bytes", 0))
+    if b > 0:
+        parts.append(f"{b} bytes")
+    cc = int(log.get("connection_count", 0))
+    if cc > 1:
+        parts.append(f"{cc} connections")
+    cat = log.get("threat_category", "")
+    if cat and cat != "normal":
+        parts.append(f"classified as {cat.replace('_', ' ')}")
+    return ". ".join(parts) if parts else "network traffic event"
+
+
+def _extract_labeled_logs(logs: list[dict]) -> tuple[np.ndarray, list[str]] | None:
+    """
+    Use threat_category label already in ES logs for supervised training.
+    This is the key fix: all logs are labeled — stop filtering to 'normal only'.
+    """
+    X_rows, y_rows = [], []
+    for log in logs:
+        cat = str(log.get("threat_category", "")).lower()
+        family = THREAT_CAT_MAP.get(cat)
+        if family is None:
+            # Infer from event_type
+            et = str(log.get("event_type", "")).lower()
+            family = THREAT_CAT_MAP.get(et, "normal")
+        ts = log.get("@timestamp", "")
+        try:
+            hour = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).hour
+        except Exception:
+            hour = 0
+        row = [
+            hour,
+            min(int(log.get("bytes", 0)), 10_000_000),
+            int(log.get("dst_port", 0)),
+            int(log.get("src_port", 0)),
+            PROTOCOL_MAP.get(str(log.get("protocol", "other")).lower(), 3),
+            EVENT_TYPE_MAP.get(str(log.get("event_type", "")).lower(), -1),
+            _is_external(str(log.get("dst_ip", "10.0.0.1"))),
+            _is_external(str(log.get("src_ip", "10.0.0.1"))),
+            int(log.get("connection_count", 1)),
+        ]
+        X_rows.append(row)
+        y_rows.append(family)
+
+    if not X_rows:
+        return None
+    return np.array(X_rows, dtype=np.float32), y_rows
+
+
+class ZeroShotClassifier:
+    """
+    HuggingFace zero-shot NLI classifier.
+    Uses cross-encoder/nli-MiniLM2-L6-H768 — fast CPU inference, no GPU needed.
+    Downloads model on first use (~120MB).
+    """
+
+    def __init__(self, model_name: str = HF_MODEL):
+        self.model_name = model_name
+        self._pipe = None
+        self._available = False
+        self._load()
+
+    def _load(self):
+        try:
+            from transformers import pipeline
+            logger.info(f"Loading HuggingFace zero-shot classifier: {self.model_name}")
+            self._pipe = pipeline(
+                "zero-shot-classification",
+                model=self.model_name,
+                device=-1,  # CPU
+            )
+            self._available = True
+            logger.info("Zero-shot classifier ready")
+        except Exception as e:
+            logger.warning(f"Zero-shot classifier unavailable: {e}. Install: pip install transformers torch")
+            self._available = False
+
+    def classify(self, texts: list[str]) -> list[dict]:
+        """Returns list of {label, score, rf_class} for each text."""
+        if not self._available or not texts:
+            return [{"label": "unknown", "score": 0.0, "rf_class": "unknown_anomaly"}] * len(texts)
+        results = []
+        for text in texts:
+            try:
+                out = self._pipe(text, ZS_LABELS, multi_label=False)
+                top_label = out["labels"][0]
+                top_score = float(out["scores"][0])
+                rf_class = ZS_LABEL_TO_CLASS.get(top_label, "unknown_anomaly")
+                results.append({"label": top_label, "score": top_score, "rf_class": rf_class})
+            except Exception as e:
+                logger.debug(f"ZS classify error: {e}")
+                results.append({"label": "unknown", "score": 0.0, "rf_class": "unknown_anomaly"})
+        return results
+
+    @property
+    def available(self):
+        return self._available
+
+
 class AnomalyDetector:
     def __init__(self):
-        self.rf_pipeline: Pipeline | None = None
-        self.if_pipeline: Pipeline | None = None
+        self.rf_pipeline: Pipeline | None = None      # NSL-KDD trained
+        self.live_pipeline: Pipeline | None = None    # Live labeled logs trained
+        self.if_pipeline: Pipeline | None = None      # IsolationForest fallback
         self.rf_classes: list[str] = []
+        self.live_classes: list[str] = []
         self.trained_at: datetime | None = None
         self.training_samples: int = 0
         self.nsl_kdd_trained: bool = False
+        self.live_supervised: bool = False
+        self.zs_classifier = ZeroShotClassifier() if USE_ZS_CLASSIFIER else None
         self._load()
 
     def _load(self):
         if MODEL_PATH.exists():
             try:
                 data = joblib.load(MODEL_PATH)
-                self.rf_pipeline   = data.get("rf_pipeline")
-                self.if_pipeline   = data.get("if_pipeline")
-                self.rf_classes    = data.get("rf_classes", [])
-                self.trained_at    = data.get("trained_at")
+                self.rf_pipeline    = data.get("rf_pipeline")
+                self.live_pipeline  = data.get("live_pipeline")
+                self.if_pipeline    = data.get("if_pipeline")
+                self.rf_classes     = data.get("rf_classes", [])
+                self.live_classes   = data.get("live_classes", [])
+                self.trained_at     = data.get("trained_at")
                 self.training_samples = data.get("training_samples", 0)
                 self.nsl_kdd_trained  = data.get("nsl_kdd_trained", False)
-                logger.info(f"Model loaded: nsl_kdd={self.nsl_kdd_trained} samples={self.training_samples}")
+                self.live_supervised  = data.get("live_supervised", False)
+                logger.info(f"Model loaded: nsl_kdd={self.nsl_kdd_trained} "
+                            f"live_supervised={self.live_supervised} "
+                            f"samples={self.training_samples}")
             except Exception as e:
                 logger.warning(f"Model load error: {e}")
 
     def is_trained(self) -> bool:
-        return self.if_pipeline is not None
+        return self.if_pipeline is not None or self.rf_pipeline is not None
 
     def train(self, live_logs: list[dict]) -> dict:
         result = {}
 
-        # 1. NSL-KDD → XGBoost full 41 features (supervised, attack classification)
+        # 1. NSL-KDD → RandomForest (supervised, offline dataset)
         nsl = _load_nsl_kdd()
         if nsl is not None:
             X_kdd, y_kdd, classes = nsl
-            logger.info(f"Training RandomForest on {len(X_kdd)} NSL-KDD samples ({len(classes)} classes, 41 features)...")
+            logger.info(f"Training RF on {len(X_kdd)} NSL-KDD samples ({len(classes)} classes)...")
             rf = Pipeline([
                 ("scaler", StandardScaler()),
-                ("rf", RandomForestClassifier(
-                    n_estimators=300,
-                    max_depth=12,
-                    n_jobs=-1,
-                    random_state=42,
-                )),
+                ("rf", RandomForestClassifier(n_estimators=300, max_depth=12,
+                                               n_jobs=-1, random_state=42)),
             ])
             X_tr, X_te, y_tr, y_te = train_test_split(X_kdd, y_kdd, test_size=0.1, random_state=42)
             rf.fit(X_tr, y_tr)
@@ -293,35 +403,57 @@ class AnomalyDetector:
             self.nsl_kdd_trained = True
             result["rf_accuracy"] = round(acc, 4)
             result["rf_classes"] = classes
-            logger.info(f"RandomForest accuracy: {acc:.4f}")
+            logger.info(f"NSL-KDD RF accuracy: {acc:.4f}")
 
-        # 2. IsolationForest on live logs (unsupervised, zero-days)
-        logs_to_use = live_logs if len(live_logs) >= 50 else []
-        if logs_to_use:
-            X_live = extract_features(logs_to_use)
+        # 2. Live labeled logs → supervised classifier
+        # KEY FIX: use ALL logs with their threat_category labels — not "normal only"
+        if live_logs:
+            labeled = _extract_labeled_logs(live_logs)
+            if labeled is not None:
+                X_live, y_live = labeled
+                unique_classes = list(set(y_live))
+                logger.info(f"Training live classifier on {len(X_live)} labeled logs "
+                            f"({len(unique_classes)} classes: {unique_classes})")
+                if len(unique_classes) >= 2:
+                    le = LabelEncoder()
+                    y_enc = le.fit_transform(y_live)
+                    live_clf = Pipeline([
+                        ("scaler", StandardScaler()),
+                        ("gb", GradientBoostingClassifier(
+                            n_estimators=200, max_depth=5,
+                            learning_rate=0.1, random_state=42,
+                        )),
+                    ])
+                    live_clf.fit(X_live, y_enc)
+                    self.live_pipeline = live_clf
+                    self.live_classes = list(le.classes_)
+                    self.live_supervised = True
+                    result["live_samples"] = len(X_live)
+                    result["live_classes"] = self.live_classes
+                    logger.info(f"Live classifier trained on {len(X_live)} samples")
+                else:
+                    logger.info(f"Only 1 class in live logs ({unique_classes}) — skipping live classifier")
+
+        # 3. IsolationForest fallback (trains on whatever we have)
+        if live_logs:
+            X_all = extract_features(live_logs)
             iforest = Pipeline([
                 ("scaler", StandardScaler()),
-                ("iforest", IsolationForest(
-                    n_estimators=200, contamination=CONTAMINATION,
-                    max_samples="auto", random_state=42, n_jobs=-1,
-                )),
+                ("iforest", IsolationForest(n_estimators=200, contamination=CONTAMINATION,
+                                             max_samples="auto", random_state=42, n_jobs=-1)),
             ])
-            iforest.fit(X_live)
+            iforest.fit(X_all)
             self.if_pipeline = iforest
-            result["if_samples"] = len(logs_to_use)
+            result["if_samples"] = len(live_logs)
         elif self.if_pipeline is None:
-            # Bootstrap with synthetic normal baseline
             X_synth = _synthetic_normal(500)
             iforest = Pipeline([
                 ("scaler", StandardScaler()),
-                ("iforest", IsolationForest(
-                    n_estimators=100, contamination=CONTAMINATION,
-                    random_state=42, n_jobs=-1,
-                )),
+                ("iforest", IsolationForest(n_estimators=100, contamination=CONTAMINATION,
+                                             random_state=42, n_jobs=-1)),
             ])
             iforest.fit(X_synth)
             self.if_pipeline = iforest
-            result["if_samples"] = 500
             result["if_bootstrapped"] = True
 
         self.trained_at = datetime.now(timezone.utc)
@@ -330,72 +462,57 @@ class AnomalyDetector:
 
         MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump({
-            "rf_pipeline": self.rf_pipeline,
-            "if_pipeline": self.if_pipeline,
-            "rf_classes": self.rf_classes,
-            "trained_at": self.trained_at,
+            "rf_pipeline":   self.rf_pipeline,
+            "live_pipeline": self.live_pipeline,
+            "if_pipeline":   self.if_pipeline,
+            "rf_classes":    self.rf_classes,
+            "live_classes":  self.live_classes,
+            "trained_at":    self.trained_at,
             "training_samples": self.training_samples,
-            "nsl_kdd_trained": self.nsl_kdd_trained,
+            "nsl_kdd_trained":  self.nsl_kdd_trained,
+            "live_supervised":  self.live_supervised,
         }, MODEL_PATH)
 
         return {"success": True, **result}
 
     def evaluate(self) -> dict:
-        """Evaluate RF on NSL-KDD hold-out test set (KDDTest+.txt)."""
         from sklearn.metrics import accuracy_score, classification_report
-
         if self.rf_pipeline is None:
             return {"error": "RF model not trained yet"}
-
         if not _download_file(NSL_KDD_TEST_URL, NSL_KDD_TEST_PATH):
             return {"error": "Failed to download KDDTest+.txt"}
-
         result = _parse_nsl_kdd_raw(NSL_KDD_TEST_PATH)
         if result is None:
             return {"error": "Failed to parse test set"}
-
         X_test_all, y_strings = result
         class_to_idx = {c: i for i, c in enumerate(self.rf_classes)}
-
-        # Keep only samples whose label exists in training classes
         X_valid, y_valid = [], []
         for i, label in enumerate(y_strings):
             idx = class_to_idx.get(label)
             if idx is not None:
                 X_valid.append(X_test_all[i])
                 y_valid.append(idx)
-
         X_valid = np.array(X_valid, dtype=np.float32)
         y_valid = np.array(y_valid)
-
         y_pred = self.rf_pipeline.predict(X_valid)
         acc = accuracy_score(y_valid, y_pred)
-
-        report = classification_report(
-            y_valid, y_pred,
-            labels=list(range(len(self.rf_classes))),
-            target_names=self.rf_classes,
-            output_dict=True,
-            zero_division=0,
-        )
-
+        report = classification_report(y_valid, y_pred,
+                                       labels=list(range(len(self.rf_classes))),
+                                       target_names=self.rf_classes,
+                                       output_dict=True, zero_division=0)
         per_class = {
-            cls: {
-                "precision": round(report[cls]["precision"], 3),
-                "recall":    round(report[cls]["recall"], 3),
-                "f1":        round(report[cls]["f1-score"], 3),
-                "support":   int(report[cls]["support"]),
-            }
-            for cls in self.rf_classes
-            if cls in report
+            cls: {"precision": round(report[cls]["precision"], 3),
+                  "recall": round(report[cls]["recall"], 3),
+                  "f1": round(report[cls]["f1-score"], 3),
+                  "support": int(report[cls]["support"])}
+            for cls in self.rf_classes if cls in report
         }
-
         return {
-            "accuracy":       round(float(acc), 4),
-            "test_samples":   len(y_valid),
+            "accuracy": round(float(acc), 4),
+            "test_samples": len(y_valid),
             "skipped_samples": len(y_strings) - len(y_valid),
-            "per_class":      per_class,
-            "evaluated_at":   datetime.now(timezone.utc).isoformat(),
+            "per_class": per_class,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def predict(self, logs: list[dict]) -> list[dict]:
@@ -403,14 +520,20 @@ class AnomalyDetector:
             return []
 
         X = extract_features(logs)
-        if_preds  = self.if_pipeline.predict(X)
-        if_scores = self.if_pipeline.decision_function(X)
+        if_preds  = self.if_pipeline.predict(X) if self.if_pipeline else np.ones(len(logs))
+        if_scores = self.if_pipeline.decision_function(X) if self.if_pipeline else np.zeros(len(logs))
+
+        # Zero-shot classification on all logs (batch)
+        zs_results = []
+        if self.zs_classifier and self.zs_classifier.available:
+            texts = [log_to_text(log) for log in logs]
+            zs_results = self.zs_classifier.classify(texts)
 
         results = []
         for i, (log, if_pred, if_score) in enumerate(zip(logs, if_preds, if_scores)):
             is_if_anomaly = if_pred == -1
 
-            # RF classification on every event (not just anomalies)
+            # NSL-KDD RF classification
             rf_class, rf_conf, rf_top = "unknown", 0.0, {}
             if self.rf_pipeline is not None:
                 try:
@@ -424,26 +547,63 @@ class AnomalyDetector:
                 except Exception:
                     pass
 
-            is_known_attack = rf_class != "normal" and rf_conf > 0.6
-            is_anomaly = is_if_anomaly or is_known_attack
+            # Live labeled classifier (trained on your actual logs)
+            live_class, live_conf = "unknown", 0.0
+            if self.live_pipeline is not None:
+                try:
+                    proba = self.live_pipeline.predict_proba(X[i:i+1])[0]
+                    live_idx = int(np.argmax(proba))
+                    live_class = self.live_classes[live_idx] if live_idx < len(self.live_classes) else "unknown"
+                    live_conf = float(proba[live_idx])
+                except Exception:
+                    pass
+
+            # Zero-shot result
+            zs = zs_results[i] if i < len(zs_results) else {}
+            zs_class = zs.get("rf_class", "unknown_anomaly")
+            zs_score = zs.get("score", 0.0)
+            zs_label = zs.get("label", "")
+
+            # Consensus: flag if ANY classifier says attack with sufficient confidence
+            is_rf_attack    = rf_class != "normal" and rf_conf > 0.6
+            is_live_attack  = live_class != "normal" and live_conf > 0.65
+            is_zs_attack    = zs_class != "normal" and zs_score > 0.6
+            is_anomaly = is_if_anomaly or is_rf_attack or is_live_attack or is_zs_attack
 
             if is_anomaly:
-                severity = _determine_severity(rf_class, rf_conf, if_score, is_if_anomaly)
+                # Best class: prefer live (trained on actual data) > ZS > NSL-KDD RF
+                final_class = (live_class if is_live_attack
+                               else zs_class if is_zs_attack
+                               else rf_class)
+                final_conf  = (live_conf if is_live_attack
+                               else zs_score if is_zs_attack
+                               else rf_conf)
+
+                severity = _determine_severity(final_class, final_conf, if_score, is_if_anomaly)
                 explanation = _explain(
-                    X[i], if_score, rf_class, rf_conf, rf_top, is_if_anomaly, is_known_attack
+                    X[i], if_score, rf_class, rf_conf, rf_top,
+                    live_class, live_conf,
+                    zs_label, zs_score,
+                    is_if_anomaly, is_rf_attack, is_live_attack, is_zs_attack,
                 )
                 results.append({
                     **log,
                     "ml_anomaly": True,
                     "ml_if_score": round(float(if_score), 4),
-                    "ml_rf_class": rf_class,
-                    "ml_rf_confidence": round(rf_conf, 3),
+                    "ml_rf_class": final_class,
+                    "ml_rf_confidence": round(final_conf, 3),
                     "ml_rf_top_classes": rf_top,
+                    "ml_live_class": live_class,
+                    "ml_live_confidence": round(live_conf, 3),
+                    "ml_zs_label": zs_label,
+                    "ml_zs_score": round(zs_score, 3),
                     "ml_severity": severity,
                     "ml_explanation": explanation,
                     "ml_detected_at": datetime.now(timezone.utc).isoformat(),
                     "ml_score": round(float(if_score), 4),
+                    "detection_method": "ml",
                 })
+
         return results
 
 
@@ -463,45 +623,36 @@ def _determine_severity(rf_class: str, rf_conf: float, if_score: float, is_if: b
     return "low"
 
 
-def _explain(X: np.ndarray, if_score: float, rf_class: str, rf_conf: float,
-             rf_top: dict, is_if: bool, is_rf: bool) -> str:
+def _explain(X, if_score, rf_class, rf_conf, rf_top,
+             live_class, live_conf, zs_label, zs_score,
+             is_if, is_rf, is_live, is_zs) -> str:
     parts = []
+    if is_live:
+        parts.append(f"Live classifier: [{live_class.upper()}] conf={live_conf:.0%} (trained on your logs)")
+    if is_zs:
+        parts.append(f"Zero-shot NLI: \"{zs_label}\" score={zs_score:.0%}")
     if is_rf:
-        parts.append(f"RF classified as [{rf_class.upper()}] confidence={rf_conf:.0%}")
+        parts.append(f"NSL-KDD RF: [{rf_class.upper()}] conf={rf_conf:.0%}")
         if rf_top:
             breakdown = " | ".join(f"{k}={v:.0%}" for k, v in list(rf_top.items())[:2])
-            parts.append(f"top classes: {breakdown}")
+            parts.append(f"top: {breakdown}")
     if is_if:
-        parts.append(f"IsolationForest score={if_score:.3f} (anomalous baseline deviation)")
+        parts.append(f"IsolationForest score={if_score:.3f}")
         bytes_val = X[FEATURE_NAMES.index("bytes")]
         if bytes_val > 100000:
             parts.append(f"large transfer={bytes_val/1024:.0f}KB")
-        ext_dst = X[FEATURE_NAMES.index("is_external_dst")]
-        if ext_dst:
+        if X[FEATURE_NAMES.index("is_external_dst")]:
             parts.append("external destination")
     return "; ".join(parts) if parts else "Anomaly detected"
 
 
 def _synthetic_normal(n: int) -> np.ndarray:
-    """Generate synthetic normal baseline for IF bootstrap."""
     import random as _r
     rows = []
     for _ in range(n):
         rows.append([
-            _r.randint(0, 23),
-            _r.randint(200, 50000),
-            _r.choice([80, 443, 53, 123]),
-            _r.randint(1024, 65535),
-            _r.choice([0, 1]),
-            _r.choice([0, 1, 2, 3]),
-            1,
-            0,
-            1,
+            _r.randint(0, 23), _r.randint(200, 50000),
+            _r.choice([80, 443, 53, 123]), _r.randint(1024, 65535),
+            _r.choice([0, 1]), _r.choice([0, 1, 2, 3]), 1, 0, 1,
         ])
     return np.array(rows, dtype=np.float32)
-
-FEATURE_NAMES = [
-    "hour_of_day", "bytes", "dst_port", "src_port",
-    "protocol_encoded", "event_type_encoded",
-    "is_external_dst", "is_external_src", "connection_count_proxy",
-]
