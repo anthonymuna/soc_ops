@@ -6,28 +6,38 @@ export default function ModelStatus({ health }) {
     </div>
   )
 
-  const trained = health.model_trained
-  const nslKdd  = health.nsl_kdd_trained
-
   return (
     <div className="bg-soc-panel border border-soc-border rounded-lg p-4 space-y-3">
       <div className="text-xs font-bold text-cyan-400 uppercase tracking-widest">AI Model Status</div>
 
       <div className="flex flex-col gap-2">
         <ModelRow
-          label="IsolationForest"
-          desc="Zero-day / unknown anomalies"
-          active={trained}
-          tag="UNSUPERVISED"
-          tagColor="cyan"
-        />
-        <ModelRow
-          label="XGBoost + NSL-KDD (41 features)"
-          desc="Known attack classification (DoS/Probe/R2L/U2R)"
-          active={nslKdd}
+          label="RandomForest — NSL-KDD"
+          desc="41-feature attack classification (DoS/Probe/R2L/U2R)"
+          active={health.nsl_kdd_trained}
           tag="SUPERVISED"
           tagColor="purple"
-          accuracy="~99.7%"
+        />
+        <ModelRow
+          label="GradientBoosting — Live Logs"
+          desc="Trained on labeled Elasticsearch traffic (threat_category)"
+          active={health.live_supervised}
+          tag="SUPERVISED"
+          tagColor="purple"
+        />
+        <ModelRow
+          label="Zero-Shot NLI — HuggingFace"
+          desc="cross-encoder/nli-MiniLM2-L6-H768 · no fine-tuning"
+          active={health.zs_classifier_ready}
+          tag="PRETRAINED"
+          tagColor="amber"
+        />
+        <ModelRow
+          label="IsolationForest"
+          desc="Unsupervised fallback — baseline anomaly detection"
+          active={health.model_trained}
+          tag="UNSUPERVISED"
+          tagColor="cyan"
         />
       </div>
 
@@ -48,6 +58,7 @@ function ModelRow({ label, desc, active, tag, tagColor, accuracy }) {
   const tagCls = {
     cyan:   'bg-cyan-400/10 text-cyan-400 border-cyan-400/20',
     purple: 'bg-purple-400/10 text-purple-400 border-purple-400/20',
+    amber:  'bg-amber-400/10 text-amber-400 border-amber-400/20',
   }
   return (
     <div className={`rounded p-2 border text-xs ${active ? 'border-soc-border bg-black/[0.02] dark:bg-white/[0.02]' : 'border-slate-200 dark:border-slate-800 opacity-50'}`}>
