@@ -23,7 +23,6 @@ import schedule
 import time
 
 from detector import AnomalyDetector
-from sigma_engine import SigmaEngine
 import report as report_gen
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -43,7 +42,6 @@ TOKEN_TTL_HOURS = 8
 
 es       = Elasticsearch(ES_HOST, request_timeout=30)
 detector = AnomalyDetector()
-sigma    = SigmaEngine()
 bearer   = HTTPBearer()
 
 stats = {
@@ -114,26 +112,15 @@ def run_scan():
         return
     stats["logs_scanned"] += len(logs)
     stats["last_scan"] = datetime.now(timezone.utc).isoformat()
-    all_alerts = []
     try:
-        # SIGMA — deterministic, always runs (no training required)
-        sigma_alerts = sigma.scan(logs)
-        if sigma_alerts:
-            all_alerts.extend(sigma_alerts)
-            logger.info(f"SIGMA: {len(sigma_alerts)} rule matches")
-
-        # ML — runs once trained
-        if detector.is_trained():
-            ml_alerts = detector.predict(logs)
-            if ml_alerts:
-                all_alerts.extend(ml_alerts)
-                logger.info(f"ML: {len(ml_alerts)} anomalies")
-        else:
-            logger.info("ML model not trained yet — SIGMA-only scan")
-
-        if all_alerts:
-            stats["anomalies_detected"] += len(all_alerts)
-            _write_alerts(all_alerts)
+        if not detector.is_trained():
+            logger.info("Model not trained yet — skipping scan")
+            return
+        alerts = detector.predict(logs)
+        if alerts:
+            stats["anomalies_detected"] += len(alerts)
+            _write_alerts(alerts)
+            logger.info(f"ML: {len(alerts)} anomalies")
     except Exception as e:
         stats["scan_errors"] += 1
         logger.error(f"Scan error: {e}")
@@ -195,28 +182,9 @@ def health(_token: str = Depends(_verify_token)):
         "nsl_kdd_trained": detector.nsl_kdd_trained,
         "live_supervised": detector.live_supervised,
         "zs_classifier_ready": detector.zs_classifier.available if detector.zs_classifier else False,
-        "sigma_rules": len(sigma.rules),
         "trained_at": detector.trained_at.isoformat() if detector.trained_at else None,
         "training_samples": detector.training_samples,
         "es_connected": es.ping(),
-    }
-
-
-@app.get("/sigma/rules")
-def sigma_rules(_token: str = Depends(_verify_token)):
-    return {
-        "total": len(sigma.rules),
-        "rules": [
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "mitre": r["mitre"],
-                "tactic": r["tactic"],
-                "severity": r["severity"],
-                "description": r["description"],
-            }
-            for r in sigma.rules
-        ],
     }
 
 
