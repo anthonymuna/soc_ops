@@ -1,0 +1,14 @@
+keys/
+*.pem
+*.key
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+models/
+node_modules/
+frontend/dist/
+*.iso
+*.iso.gz
+*.iso.bz2
+.env

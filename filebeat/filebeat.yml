@@ -1,0 +1,44 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /host/var/log/auth.log
+      - /host/var/log/syslog
+    fields:
+      log_source: system_auth
+      host_system: true
+    fields_under_root: true
+    multiline.pattern: '^\w{3}\s+\d{1,2}'
+    multiline.negate: true
+    multiline.match: after
+
+  - type: log
+    enabled: true
+    paths:
+      - /host/var/log/audit/audit.log
+    fields:
+      log_source: auditd
+      host_system: true
+    fields_under_root: true
+
+  - type: log
+    enabled: true
+    paths:
+      - /host/tmp/atomic-runner/*.log
+    fields:
+      log_source: atomic_red_team
+      host_system: true
+    fields_under_root: true
+
+processors:
+  - add_host_metadata: ~
+  - decode_json_fields:
+      fields: ["message"]
+      target: "json"
+      overwrite_keys: false
+
+output.logstash:
+  hosts: ["logstash:5044"]
+  bulk_max_size: 2048
+
+logging.level: warning
