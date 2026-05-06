@@ -178,6 +178,8 @@ services:
       - PFSENSE_API_KEY=${PFSENSE_API_KEY:-}
       - PFSENSE_ALIAS=syndicate4_blocklist
       - BLOCK_SEVERITIES=critical,high
+      # CRITICAL: add your management IP here before setting DRY_RUN=false
+      # e.g. NEVER_BLOCK=10.104.4.0/24,YOUR.MGMT.IP.HERE
       - NEVER_BLOCK=${NEVER_BLOCK:-10.104.4.0/24}
       - POLL_INTERVAL=10
       - DRY_RUN=${DRY_RUN:-true}

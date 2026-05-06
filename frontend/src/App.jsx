@@ -52,7 +52,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Shield className="text-cyan-400 w-5 h-5" />
-            <span className="font-bold text-cyan-400 tracking-widest text-sm">SYNDICATE4</span>
+            <span className="font-bold text-cyan-400 tracking-widest text-sm">MORAN SOC</span>
             <span className="text-slate-600 text-xs hidden sm:inline">AI-BASED CYBER THREAT DETECTION</span>
             <div className="hidden sm:flex items-center gap-1 ml-2">
               {[
@@ -214,7 +214,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
       </main>
 
       <footer className="border-t border-soc-border mt-8 py-3 text-center text-[10px] text-slate-700">
-        SYNDICATE4 · AI-Based Cyber Threat Detection · Defensive SOC System
+        MORAN SOC · AI-Based Cyber Threat Detection · Defensive SOC System
       </footer>
     </div>
   )
