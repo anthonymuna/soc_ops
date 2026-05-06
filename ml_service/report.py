@@ -43,7 +43,7 @@ class SocPDF(FPDF):
         self.rect(0, 0, 210, 14, "F")
         self.set_font("Helvetica", "B", 8)
         self.set_text_color(*C_ACCENT)
-        self.cell(0, 14, "SYNDICATE4  ·  AI CYBER THREAT DETECTION  ·  CONFIDENTIAL", align="C")
+        self.cell(0, 14, "MORAN SOC  |  AI CYBER THREAT DETECTION  |  CONFIDENTIAL", align="C")
         self.ln(4)
 
     def footer(self):
@@ -210,12 +210,12 @@ def build_report(es_client, hours: int = 24) -> bytes:
     pdf.set_y(20)
     pdf.set_font("Helvetica", "B", 20)
     pdf.set_text_color(*C_ACCENT)
-    pdf.cell(0, 10, "SYNDICATE4", align="C", ln=True)
+    pdf.cell(0, 10, "MORAN SOC", align="C", ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(*C_DIM)
-    pdf.cell(0, 6, "AI-Based Cyber Threat Detection - SOC Threat Report", align="C", ln=True)
+    pdf.cell(0, 6, "AI-Based Cyber Threat Detection — Threat Intelligence Report", align="C", ln=True)
     pdf.set_font("Helvetica", "", 8)
-    pdf.cell(0, 5, f"Period: last {hours}h  ·  Generated: {now.strftime('%Y-%m-%d %H:%M UTC')}",
+    pdf.cell(0, 5, f"Period: last {hours}h  |  Generated: {now.strftime('%Y-%m-%d %H:%M UTC')}",
              align="C", ln=True)
     pdf.ln(18)
 
@@ -227,7 +227,7 @@ def build_report(es_client, hours: int = 24) -> bytes:
     pdf.kv_row("High",      str(sev_buckets.get("high", 0)),     C_YELLOW)
     pdf.kv_row("Medium",    str(sev_buckets.get("medium", 0)),   C_PURPLE)
     pdf.kv_row("Low",       str(sev_buckets.get("low", 0)),      C_DIM)
-    pdf.kv_row("Report period", f"{since[:10]} → {now.strftime('%Y-%m-%d')}")
+    pdf.kv_row("Report period", f"{since[:10]} to {now.strftime('%Y-%m-%d')}")
 
     # ── Alert timeline ────────────────────────────────────────────────────────
     if hourly:

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { FileText } from 'lucide-react'
 import { getToken } from '../auth'
 
-export default function ReportGenerator() {
+export default function ReportGenerator({ stats, alerts, history, health }) {
   const [loading, setLoading] = useState(false)
   const [hours, setHours] = useState(24)
 
@@ -18,7 +18,7 @@ export default function ReportGenerator() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `syndicate4_report_${new Date().toISOString().slice(0, 10)}.pdf`
+      a.download = `moran_soc_report_${new Date().toISOString().slice(0, 10)}.pdf`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {

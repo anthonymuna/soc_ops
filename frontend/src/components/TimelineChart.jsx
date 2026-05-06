@@ -3,7 +3,7 @@ import {
 } from 'recharts'
 import { useMemo } from 'react'
 
-function bucketAlerts(alerts, bucketMinutes = 5) {
+function bucketAlerts(alerts, bucketMinutes = 15) {
   const buckets = {}
   for (const a of alerts) {
     const ts = a.ml_detected_at || a['@timestamp']
@@ -18,7 +18,7 @@ function bucketAlerts(alerts, bucketMinutes = 5) {
   }
   return Object.values(buckets)
     .sort((a, b) => a.time.localeCompare(b.time))
-    .slice(-24)
+    .slice(-48)
     .map(b => ({ ...b, time: b.time.slice(11, 16) }))
 }
 
@@ -55,7 +55,7 @@ export default function TimelineChart({ history, dark = false }) {
   return (
     <div className="bg-soc-panel border border-soc-border rounded-lg p-4">
       <div className="text-xs font-semibold text-cyan-400 uppercase tracking-widest mb-3">
-        Alert Timeline (5-min buckets)
+        Alert Timeline (15-min buckets · 12h)
       </div>
       {data.length === 0 ? (
         <div className="h-32 flex items-center justify-center text-slate-600 text-sm">

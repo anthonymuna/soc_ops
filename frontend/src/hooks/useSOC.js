@@ -22,7 +22,7 @@ export function useSOC(refreshMs = 10000, onUnauth) {
       const [h, s, a] = await Promise.allSettled([
         fetchJson(`${ML_API}/health`,                onUnauth),
         fetchJson(`${ML_API}/stats`,                 onUnauth),
-        fetchJson(`${ML_API}/alerts?limit=50&minutes=60`, onUnauth),
+        fetchJson(`${ML_API}/alerts?limit=200&minutes=360`, onUnauth),
       ])
       if (h.status === 'fulfilled') setHealth(h.value)
       if (s.status === 'fulfilled') setStats(s.value)
