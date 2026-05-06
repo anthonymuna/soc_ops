@@ -13,7 +13,7 @@ export function clearToken() {
 }
 
 export function isLoggedIn() {
-  return true
+  return Boolean(sessionStorage.getItem(TOKEN_KEY))
 }
 
 export async function login(username, password) {

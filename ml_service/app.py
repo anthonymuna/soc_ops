@@ -157,9 +157,12 @@ app.add_middleware(
 
 @app.post("/auth/login")
 def login(req: LoginRequest):
+    if not (hmac.compare_digest(req.username, AUTH_USERNAME) and
+            hmac.compare_digest(req.password, AUTH_PASSWORD)):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     token = secrets.token_hex(32)
     _active_tokens[token] = datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)
-    logger.info(f"Login (bypass): {req.username}")
+    logger.info(f"Login: {req.username}")
     return {"token": token, "expires_in_hours": TOKEN_TTL_HOURS}
 
 
