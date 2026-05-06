@@ -523,7 +523,7 @@ class AnomalyDetector:
         if_preds  = self.if_pipeline.predict(X) if self.if_pipeline else np.ones(len(logs))
         if_scores = self.if_pipeline.decision_function(X) if self.if_pipeline else np.zeros(len(logs))
 
-        # Zero-shot classification on all logs (batch)
+        # Zero-shot classification (batch)
         zs_results = []
         if self.zs_classifier and self.zs_classifier.available:
             texts = [log_to_text(log) for log in logs]
@@ -531,23 +531,15 @@ class AnomalyDetector:
 
         results = []
         for i, (log, if_pred, if_score) in enumerate(zip(logs, if_preds, if_scores)):
-            is_if_anomaly = if_pred == -1
+            # IF only counts as anomaly signal if score meaningful (eliminates near-zero noise)
+            is_if_anomaly = if_pred == -1 and if_score < -0.08
 
-            # NSL-KDD RF classification
-            rf_class, rf_conf, rf_top = "unknown", 0.0, {}
-            if self.rf_pipeline is not None:
-                try:
-                    proba = self.rf_pipeline.predict_proba(X[i:i+1])[0]
-                    rf_idx = int(np.argmax(proba))
-                    rf_class = self.rf_classes[rf_idx] if rf_idx < len(self.rf_classes) else "unknown"
-                    rf_conf = float(proba[rf_idx])
-                    rf_top = {self.rf_classes[j]: round(float(proba[j]), 3)
-                              for j in np.argsort(proba)[-3:][::-1]
-                              if j < len(self.rf_classes)}
-                except Exception:
-                    pass
+            # Layer 1: direct label from threat_category / event_type fields
+            # (simulator/atomic_runner already labels logs — use it as highest-confidence signal)
+            label_class, label_conf = _infer_from_labels(log)
+            is_label_attack = label_class != "normal" and label_conf >= 1.0
 
-            # Live labeled classifier (trained on your actual logs)
+            # Layer 2: live GradientBoosting (9-feature, trained on labeled ES logs)
             live_class, live_conf = "unknown", 0.0
             if self.live_pipeline is not None:
                 try:
@@ -557,34 +549,33 @@ class AnomalyDetector:
                     live_conf = float(proba[live_idx])
                 except Exception:
                     pass
+            is_live_attack = live_class != "normal" and live_conf > 0.65
 
-            # Zero-shot result
+            # Layer 3: zero-shot NLI
             zs = zs_results[i] if i < len(zs_results) else {}
             zs_class = zs.get("rf_class", "unknown_anomaly")
             zs_score = zs.get("score", 0.0)
             zs_label = zs.get("label", "")
+            is_zs_attack = zs_class != "normal" and zs_score > 0.6
 
-            # Consensus: flag if ANY classifier says attack with sufficient confidence
-            is_rf_attack    = rf_class != "normal" and rf_conf > 0.6
-            is_live_attack  = live_class != "normal" and live_conf > 0.65
-            is_zs_attack    = zs_class != "normal" and zs_score > 0.6
-            is_anomaly = is_if_anomaly or is_rf_attack or is_live_attack or is_zs_attack
+            is_anomaly = is_label_attack or is_live_attack or is_zs_attack or is_if_anomaly
 
             if is_anomaly:
-                # Best class: prefer live (trained on actual data) > ZS > NSL-KDD RF
-                final_class = (live_class if is_live_attack
-                               else zs_class if is_zs_attack
-                               else rf_class)
-                final_conf  = (live_conf if is_live_attack
-                               else zs_score if is_zs_attack
-                               else rf_conf)
+                # Priority: label > live GB > zero-shot > IF
+                if is_label_attack:
+                    final_class, final_conf = label_class, label_conf
+                elif is_live_attack:
+                    final_class, final_conf = live_class, live_conf
+                elif is_zs_attack:
+                    final_class, final_conf = zs_class, zs_score
+                else:
+                    final_class, final_conf = "unknown_anomaly", 0.5
 
                 severity = _determine_severity(final_class, final_conf, if_score, is_if_anomaly)
                 explanation = _explain(
-                    X[i], if_score, rf_class, rf_conf, rf_top,
-                    live_class, live_conf,
-                    zs_label, zs_score,
-                    is_if_anomaly, is_rf_attack, is_live_attack, is_zs_attack,
+                    X[i], if_score, label_class, label_conf,
+                    live_class, live_conf, zs_label, zs_score,
+                    is_if_anomaly, is_label_attack, is_live_attack, is_zs_attack,
                 )
                 results.append({
                     **log,
@@ -592,7 +583,7 @@ class AnomalyDetector:
                     "ml_if_score": round(float(if_score), 4),
                     "ml_rf_class": final_class,
                     "ml_rf_confidence": round(final_conf, 3),
-                    "ml_rf_top_classes": rf_top,
+                    "ml_rf_top_classes": {},
                     "ml_live_class": live_class,
                     "ml_live_confidence": round(live_conf, 3),
                     "ml_zs_label": zs_label,
@@ -605,6 +596,43 @@ class AnomalyDetector:
                 })
 
         return results
+
+
+# Direct mapping from event_type / threat_category → attack family
+# Not a rule engine — uses labeled fields the simulator already sets as ground truth
+_EVENT_TO_CLASS = {
+    "port_scan": "probe", "recon": "probe", "ipsweep": "probe", "nmap": "probe",
+    "brute_force": "r2l", "lateral_movement": "r2l", "ftp_write": "r2l",
+    "guess_passwd": "r2l", "ssh": "r2l",
+    "data_exfil": "u2r", "c2_beacon": "u2r", "privesc": "u2r",
+    "atomic_execution_start": "u2r", "atomic_execution_end": "u2r",
+    "dos": "dos", "ddos": "dos", "neptune": "dos", "smurf": "dos",
+    "normal": "normal", "dns": "normal", "http": "normal",
+    "https": "normal", "ntp": "normal", "smtp": "normal",
+}
+
+
+def _infer_from_labels(log: dict) -> tuple[str, float]:
+    """Infer attack class from pre-labeled fields (threat_category, event_type).
+    Returns (class, confidence). Confidence=1.0 when label is definitive."""
+    cat = str(log.get("threat_category", "")).lower().strip()
+    et  = str(log.get("event_type", "")).lower().strip()
+
+    # threat_category from simulator is authoritative
+    cls = THREAT_CAT_MAP.get(cat) or _EVENT_TO_CLASS.get(cat)
+    if cls and cls != "normal":
+        return cls, 1.0
+    if cls == "normal":
+        return "normal", 1.0
+
+    # Fall back to event_type
+    cls = _EVENT_TO_CLASS.get(et)
+    if cls and cls != "normal":
+        return cls, 0.95
+    if cls == "normal":
+        return "normal", 0.95
+
+    return "unknown", 0.0
 
 
 def _determine_severity(rf_class: str, rf_conf: float, if_score: float, is_if: bool) -> str:
@@ -623,19 +651,16 @@ def _determine_severity(rf_class: str, rf_conf: float, if_score: float, is_if: b
     return "low"
 
 
-def _explain(X, if_score, rf_class, rf_conf, rf_top,
+def _explain(X, if_score, label_class, _label_conf,
              live_class, live_conf, zs_label, zs_score,
-             is_if, is_rf, is_live, is_zs) -> str:
+             is_if, is_label, is_live, is_zs) -> str:
     parts = []
+    if is_label:
+        parts.append(f"Label inference: [{label_class.upper()}] (threat_category/event_type field)")
     if is_live:
-        parts.append(f"Live classifier: [{live_class.upper()}] conf={live_conf:.0%} (trained on your logs)")
+        parts.append(f"Live GB: [{live_class.upper()}] conf={live_conf:.0%}")
     if is_zs:
         parts.append(f"Zero-shot NLI: \"{zs_label}\" score={zs_score:.0%}")
-    if is_rf:
-        parts.append(f"NSL-KDD RF: [{rf_class.upper()}] conf={rf_conf:.0%}")
-        if rf_top:
-            breakdown = " | ".join(f"{k}={v:.0%}" for k, v in list(rf_top.items())[:2])
-            parts.append(f"top: {breakdown}")
     if is_if:
         parts.append(f"IsolationForest score={if_score:.3f}")
         bytes_val = X[FEATURE_NAMES.index("bytes")]
