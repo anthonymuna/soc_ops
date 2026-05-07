@@ -55,7 +55,7 @@ case "${1:-deploy}" in
     ;;
 
   --tunnel)
-    echo "Starting SSH tunnel (Frontend:3000, Kibana:5601, ML API:8000)..."
+    echo "Starting SSH tunnel (Frontend:3000, Kibana:5601, ML API:8000, Responder:8001)..."
     echo "Open browser: http://localhost:3000"
     echo "Ctrl+C to stop"
     autossh -M 0 \
@@ -67,11 +67,13 @@ case "${1:-deploy}" in
       -L 3000:localhost:3000 \
       -L 5601:localhost:5601 \
       -L 8000:localhost:8000 \
+      -L 8001:localhost:8001 \
       "${USER}@${SERVER}" 2>/dev/null || \
     ssh $SSH_OPTS -N \
       -L 3000:localhost:3000 \
       -L 5601:localhost:5601 \
       -L 8000:localhost:8000 \
+      -L 8001:localhost:8001 \
       "${USER}@${SERVER}"
     exit 0
     ;;
@@ -108,6 +110,8 @@ rsync_cmd \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   --exclude='.DS_Store' \
+  --exclude='*.iso' \
+  --exclude='*.iso.gz' \
   "$(dirname "$0")/" \
   "${USER}@${SERVER}:${REMOTE_DIR}/"
 

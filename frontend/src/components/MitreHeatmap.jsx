@@ -8,11 +8,12 @@ const TECHNIQUES = [
   { id: 'T1110',     name: 'Brute Force',   tactic: 'Credential' },
   { id: 'T1110.001', name: 'Pwd Guess',     tactic: 'Credential' },
   { id: 'T1021',     name: 'Remote Svc',    tactic: 'Lateral' },
-  { id: 'T1021.002', name: 'SMB',           tactic: 'Lateral' },
   { id: 'T1041',     name: 'Exfil C2',      tactic: 'Exfil' },
   { id: 'T1071',     name: 'C2 Beacon',     tactic: 'C2' },
   { id: 'T1105',     name: 'Tool Transfer', tactic: 'C2' },
   { id: 'T1059',     name: 'Cmd Exec',      tactic: 'Execution' },
+  { id: 'T1068',     name: 'Priv Esc',      tactic: 'PrivEsc' },
+  { id: 'T1498',     name: 'Net DoS',       tactic: 'Impact' },
 ]
 
 const TACTIC_COLOR = {
@@ -22,6 +23,8 @@ const TACTIC_COLOR = {
   Exfil:      'from-red-100 to-red-50 border-red-200 dark:from-red-900/60 dark:to-red-800/40 dark:border-red-700/30',
   C2:         'from-rose-100 to-rose-50 border-rose-200 dark:from-rose-900/60 dark:to-rose-800/40 dark:border-rose-700/30',
   Execution:  'from-yellow-100 to-yellow-50 border-yellow-200 dark:from-yellow-900/60 dark:to-yellow-800/40 dark:border-yellow-700/30',
+  PrivEsc:    'from-violet-100 to-violet-50 border-violet-200 dark:from-violet-900/60 dark:to-violet-800/40 dark:border-violet-700/30',
+  Impact:     'from-gray-100 to-gray-50 border-gray-300 dark:from-gray-900/60 dark:to-gray-800/40 dark:border-gray-600/30',
 }
 
 import { useState } from 'react'

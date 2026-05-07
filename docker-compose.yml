@@ -172,9 +172,11 @@ services:
     container_name: syndicate4-responder
     ports:
       - "8001:8001"
+    extra_hosts:
+      - "host-gateway:host-gateway"
     environment:
       - ES_HOST=http://elasticsearch:9200
-      - PFSENSE_URL=${PFSENSE_URL:-}
+      - PFSENSE_URL=${PFSENSE_URL:-http://host-gateway:8080}
       - PFSENSE_API_KEY=${PFSENSE_API_KEY:-}
       - PFSENSE_ALIAS=syndicate4_blocklist
       - BLOCK_SEVERITIES=critical,high
