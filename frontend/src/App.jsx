@@ -43,7 +43,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
     : null
 
   const criticalCount = alerts.filter(a => a.ml_severity === 'critical').length
-  const highCount     = alerts.filter(a => a.ml_severity === 'high').length
+  const highCount = alerts.filter(a => a.ml_severity === 'high').length
 
   return (
     <div className="min-h-screen grid-bg">
@@ -52,21 +52,20 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Shield className="text-cyan-400 w-5 h-5" />
-            <span className="font-bold text-cyan-400 tracking-widest text-sm">MORAN SOC</span>
+            <span className="font-bold text-cyan-400 tracking-widest text-sm">NGAO SOC</span>
             <span className="text-slate-600 text-xs hidden sm:inline">AI-BASED CYBER THREAT DETECTION</span>
             <div className="hidden sm:flex items-center gap-1 ml-2">
               {[
                 { id: 'dashboard', icon: <LayoutDashboard className="w-3 h-3" />, label: 'Dashboard' },
-                { id: 'test',      icon: <FlaskConical className="w-3 h-3" />,    label: 'Model Tests' },
+                { id: 'test', icon: <FlaskConical className="w-3 h-3" />, label: 'Model Tests' },
               ].map(t => (
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${
-                    tab === t.id
-                      ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors ${tab === t.id
+                    ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                    : 'text-slate-500 hover:text-slate-300'
+                    }`}
                 >
                   {t.icon}{t.label}
                 </button>
@@ -166,11 +165,11 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
             label="Model"
             value={health?.model_trained ? 'ACTIVE' : 'TRAINING'}
             sub={
-  health?.zs_classifier_ready ? 'RF + GB + ZeroShot + IF' :
-  health?.live_supervised      ? 'RF + GB + IF' :
-  health?.nsl_kdd_trained      ? 'RF + IF' :
-  'IsolationForest'
-}
+              health?.zs_classifier_ready ? 'RF + GB + ZeroShot + IF' :
+                health?.live_supervised ? 'RF + GB + IF' :
+                  health?.nsl_kdd_trained ? 'RF + IF' :
+                    'IsolationForest'
+            }
             color={health?.model_trained ? 'soc-green' : 'soc-yellow'}
             icon={<Cpu className="w-4 h-4" />}
           />
@@ -195,10 +194,10 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
               <div className="text-xs font-bold text-cyan-400 uppercase tracking-widest">System</div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 {[
-                  ['Scan errors',  stats?.scan_errors ?? 0, stats?.scan_errors > 0 ? 'text-rose-400' : 'text-slate-500'],
-                  ['Last scan',    stats?.last_scan?.slice(11,19) ?? '—', 'text-slate-400'],
-                  ['Last train',   health?.trained_at?.slice(11,19) ?? '—', 'text-slate-400'],
-                  ['ES online',    health?.es_connected ? 'YES' : 'NO', health?.es_connected ? 'text-emerald-400' : 'text-rose-400'],
+                  ['Scan errors', stats?.scan_errors ?? 0, stats?.scan_errors > 0 ? 'text-rose-400' : 'text-slate-500'],
+                  ['Last scan', stats?.last_scan?.slice(11, 19) ?? '—', 'text-slate-400'],
+                  ['Last train', health?.trained_at?.slice(11, 19) ?? '—', 'text-slate-400'],
+                  ['ES online', health?.es_connected ? 'YES' : 'NO', health?.es_connected ? 'text-emerald-400' : 'text-rose-400'],
                 ].map(([k, v, cls]) => (
                   <div key={k}>
                     <div className="text-slate-600">{k}</div>
@@ -219,7 +218,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
       </main>
 
       <footer className="border-t border-soc-border mt-8 py-3 text-center text-[10px] text-slate-700">
-        MORAN SOC · AI-Based Cyber Threat Detection · Defensive SOC System
+        NGAO SOC · AI-Based Cyber Threat Detection · Defensive SOC System
       </footer>
     </div>
   )
@@ -255,7 +254,7 @@ function AttackClassBreakdown({ history }) {
               />
             </div>
             <span className="text-xs text-slate-500 w-12 text-right">
-              {count} ({((count/total)*100).toFixed(0)}%)
+              {count} ({((count / total) * 100).toFixed(0)}%)
             </span>
           </div>
         ))}

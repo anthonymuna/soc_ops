@@ -5,8 +5,8 @@ import { login } from '../auth'
 export default function LoginPage({ onLogin }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError]       = useState('')
-  const [loading, setLoading]   = useState(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -38,7 +38,7 @@ export default function LoginPage({ onLogin }) {
             <Shield className="w-8 h-8 text-sky-600 dark:text-cyan-400" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 tracking-widest">
-            MORAN SOC
+            NGAO SOC
           </h1>
           <p className="text-slate-400 text-xs mt-1 tracking-wider uppercase">
             AI Cyber Threat Detection
