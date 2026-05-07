@@ -18,7 +18,7 @@ export default function ReportGenerator({ stats, alerts, history, health }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `moran_soc_report_${new Date().toISOString().slice(0, 10)}.pdf`
+      a.download = `ngao_soc_report_${new Date().toISOString().slice(0, 10)}.pdf`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
