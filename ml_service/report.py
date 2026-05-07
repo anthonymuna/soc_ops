@@ -43,7 +43,7 @@ class SocPDF(FPDF):
         self.rect(0, 0, 210, 14, "F")
         self.set_font("Helvetica", "B", 8)
         self.set_text_color(*C_ACCENT)
-        self.cell(0, 14, "MORAN SOC  |  AI CYBER THREAT DETECTION  |  CONFIDENTIAL", align="C")
+        self.cell(0, 14, "NGAO SOC  |  AI CYBER THREAT DETECTION  |  CONFIDENTIAL", align="C")
         self.ln(4)
 
     def footer(self):
@@ -210,7 +210,7 @@ def build_report(es_client, hours: int = 24) -> bytes:
     pdf.set_y(20)
     pdf.set_font("Helvetica", "B", 20)
     pdf.set_text_color(*C_ACCENT)
-    pdf.cell(0, 10, "MORAN SOC", align="C", ln=True)
+    pdf.cell(0, 10, "NGAO SOC", align="C", ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(*C_DIM)
     pdf.cell(0, 6, "AI-Based Cyber Threat Detection — Threat Intelligence Report", align="C", ln=True)
