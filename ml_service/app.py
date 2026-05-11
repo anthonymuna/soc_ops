@@ -19,8 +19,9 @@ from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from elasticsearch import Elasticsearch, NotFoundError
-import schedule
 import time
+import httpx
+import schedule
 
 from detector import AnomalyDetector
 import report as report_gen
@@ -35,10 +36,13 @@ LOG_INDEX_PATTERN = "syndicate4-logs-*"
 ALERT_INDEX    = "syndicate4-ml-alerts"
 
 AUTH_USERNAME  = os.getenv("AUTH_USERNAME", "admin")
-AUTH_PASSWORD  = os.getenv("AUTH_PASSWORD", "syndicate4")
+AUTH_PASSWORD  = os.getenv("AUTH_PASSWORD", "admin")
 # In-memory token store: token -> expiry datetime
 _active_tokens: dict[str, datetime] = {}
 TOKEN_TTL_HOURS = 8
+
+NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "")
+FEEDBACK_INDEX = "syndicate4-feedback"
 
 es       = Elasticsearch(ES_HOST, request_timeout=30)
 detector = AnomalyDetector()
@@ -58,6 +62,11 @@ stats = {
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class FeedbackRequest(BaseModel):
+    label: str  # e.g., 'normal' or 'dos'
+    comment: str | None = None
 
 
 def _verify_token(_creds: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))) -> str:
@@ -91,19 +100,56 @@ def _fetch_logs(minutes_back: int = 5, size: int = 500, normal_only: bool = Fals
 def _write_alerts(alerts: list[dict]):
     for alert in alerts:
         try:
-            es.index(index=ALERT_INDEX, document=alert)
+            # Create a deterministic ID: timestamp + src_ip + event_type
+            # This matches the frontend's getAlertId logic
+            aid = f"{alert.get('ml_detected_at','')}{alert.get('src_ip','')}{alert.get('event_type','')}"
+            es.index(index=ALERT_INDEX, id=aid, document=alert)
         except Exception as e:
             logger.warning(f"Alert write error: {e}")
 
 
 def run_train():
-    # Fetch ALL labeled logs — threat_category field used as supervised label
-    # (normal_only=True was wrong — all logs are labeled attacks from Atomic Red Team)
-    logger.info("Training model on all labeled logs...")
+    # Fetch labels from both logs and user feedback
+    logger.info("Training model on labeled logs + user feedback...")
     logs = _fetch_logs(minutes_back=120, size=5000, normal_only=False)
-    result = detector.train(logs)
+    
+    # Try to fetch user feedback labels
+    feedback_logs = []
+    try:
+        if es.indices.exists(index=FEEDBACK_INDEX):
+            resp = es.search(index=FEEDBACK_INDEX, body={"size": 1000})
+            feedback_logs = [h["_source"] for h in resp["hits"]["hits"]]
+            logger.info(f"Adding {len(feedback_logs)} user feedback samples to training set")
+    except Exception as e:
+        logger.warning(f"Feedback fetch error: {e}")
+
+    result = detector.train(logs + feedback_logs)
     stats["last_train"] = datetime.now(timezone.utc).isoformat()
     logger.info(f"Train result: {result}")
+
+
+def _send_notification(alert: dict):
+    if not NOTIFY_WEBHOOK_URL:
+        return
+    
+    try:
+        payload = {
+            "embeds": [{
+                "title": f"🚨 {alert.get('ml_severity', 'high').upper()} Alert: {alert.get('ml_rf_class', 'Anomaly')}",
+                "description": alert.get("ml_explanation", "No explanation provided"),
+                "color": 15158332 if alert.get("ml_severity") == "critical" else 15105570,
+                "fields": [
+                    {"name": "Source IP", "value": alert.get("src_ip", "unknown"), "inline": True},
+                    {"name": "Dest IP", "value": alert.get("dst_ip", "unknown"), "inline": True},
+                    {"name": "Port", "value": str(alert.get("dst_port", "0")), "inline": True},
+                ],
+                "footer": {"text": f"NGAO SOC AI Engine • {alert.get('ml_detected_at')}"}
+            }]
+        }
+        with httpx.Client() as client:
+            client.post(NOTIFY_WEBHOOK_URL, json=payload)
+    except Exception as e:
+        logger.warning(f"Notification failed: {e}")
 
 
 def run_scan():
@@ -121,6 +167,10 @@ def run_scan():
             stats["anomalies_detected"] += len(alerts)
             _write_alerts(alerts)
             logger.info(f"ML: {len(alerts)} anomalies")
+            # Send notifications for high/critical alerts
+            for alert in alerts:
+                if alert.get("ml_severity") in ("critical", "high"):
+                    _send_notification(alert)
     except Exception as e:
         stats["scan_errors"] += 1
         logger.error(f"Scan error: {e}")
@@ -219,6 +269,34 @@ def get_alerts(limit: int = 50, minutes: int = 60, _token: str = Depends(_verify
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/alerts/{alert_id}/feedback")
+def submit_feedback(alert_id: str, req: FeedbackRequest, _token: str = Depends(_verify_token)):
+    """Accept human feedback (legit threat vs false positive)."""
+    logger.info(f"Feedback received for {alert_id}: {req.label}")
+    try:
+        # 1. Store in feedback index for retraining
+        feedback_doc = {
+            "alert_id": alert_id,
+            "label": req.label,
+            "comment": req.comment,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        res = es.index(index=FEEDBACK_INDEX, document=feedback_doc)
+        
+        # 2. Update the alert document itself to mark it as human-verified
+        try:
+            # We use the deterministic ID here
+            es.update(index=ALERT_INDEX, id=alert_id, body={"doc": {"human_labeled": req.label}})
+        except Exception as e:
+            logger.warning(f"Failed to update alert status: {e}")
+
+        logger.info(f"Feedback indexed: {res.get('result')}")
+        return {"status": "success", "id": res.get("_id")}
+    except Exception as e:
+        logger.error(f"Feedback failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/train")
 def trigger_train(background_tasks: BackgroundTasks, _token: str = Depends(_verify_token)):
     background_tasks.add_task(run_train)
@@ -258,6 +336,39 @@ def recent_logs(limit: int = 100, minutes: int = 10, _token: str = Depends(_veri
     return {"total": len(logs), "logs": logs}
 
 
+@app.post("/alerts/{alert_id}/feedback")
+def submit_feedback(alert_id: str, req: FeedbackRequest, _token: str = Depends(_verify_token)):
+    """Store user feedback for an alert to be used in next training run."""
+    try:
+        # 1. Fetch original alert to get its features
+        resp = es.search(index=ALERT_INDEX, body={"query": {"match": {"_id": alert_id}}})
+        if not resp["hits"]["hits"]:
+            # Fallback: try searching by a field if _id isn't the document ID
+            resp = es.search(index=ALERT_INDEX, body={"query": {"term": {"id": alert_id}}})
+            if not resp["hits"]["hits"]:
+                raise HTTPException(status_code=404, detail="Alert not found")
+        
+        original_alert = resp["hits"]["hits"][0]["_source"]
+        
+        # 2. Create a labeled sample for training
+        feedback_doc = {
+            **original_alert,
+            "threat_category": req.label,
+            "user_comment": req.comment,
+            "feedback_at": datetime.now(timezone.utc).isoformat(),
+            "source": "user_feedback"
+        }
+        
+        # 3. Save to feedback index
+        es.index(index=FEEDBACK_INDEX, document=feedback_doc)
+        logger.info(f"Feedback received for alert {alert_id}: {req.label}")
+        
+        return {"message": f"Feedback stored. Model will retrain with this label in the next cycle."}
+    except Exception as e:
+        logger.error(f"Feedback submission error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/report")
 def get_report(hours: int = 24, _token: str = Depends(_verify_token)):
     try:
@@ -270,4 +381,30 @@ def get_report(hours: int = 24, _token: str = Depends(_verify_token)):
         )
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/alerts/{alert_id}/report")
+def get_incident_report(alert_id: str, _token: str = Depends(_verify_token)):
+    """Generate a detailed PDF report for a single specific alert."""
+    try:
+        # Fetch alert
+        resp = es.search(index=ALERT_INDEX, body={"query": {"match": {"_id": alert_id}}})
+        if not resp["hits"]["hits"]:
+            resp = es.search(index=ALERT_INDEX, body={"query": {"term": {"id": alert_id}}})
+            if not resp["hits"]["hits"]:
+                raise HTTPException(status_code=404, detail="Alert not found")
+        
+        alert = resp["hits"]["hits"][0]["_source"]
+        alert["_id"] = alert_id
+        
+        pdf_bytes = report_gen.build_incident_report(alert)
+        filename = f"intel_report_{alert_id[:8]}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.error(f"Incident report generation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

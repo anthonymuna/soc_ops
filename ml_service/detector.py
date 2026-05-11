@@ -11,6 +11,7 @@ import logging
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+import threading
 
 import numpy as np
 import joblib
@@ -121,6 +122,29 @@ SEV_MAP = {
     "normal": "info", "dos": "critical", "probe": "medium",
     "r2l": "high", "u2r": "critical", "unknown_anomaly": "high",
 }
+
+# Simplified IP-to-Country mapping for demonstration
+GEO_MAP = {
+    "10.": "Local Network",
+    "192.168.": "Private Network",
+    "172.16.": "Private Network",
+    "172.17.": "Private Network",
+    "172.18.": "Private Network",
+    "172.19.": "Private Network",
+    "127.": "Loopback",
+    "8.8.8.8": "USA (Google)",
+    "1.1.1.1": "USA (Cloudflare)",
+    "45.33.": "USA (Linode)",
+    "185.199.": "USA (GitHub)",
+    "10.104.": "Internal SOC Lab",
+}
+
+
+def _get_geo(ip: str) -> str:
+    for prefix, country in GEO_MAP.items():
+        if str(ip).startswith(prefix):
+            return country
+    return "External / Unknown"
 
 
 def _is_external(ip: str) -> int:
@@ -233,7 +257,7 @@ def log_to_text(log: dict) -> str:
     parts = []
     et = log.get("event_type", "")
     if et:
-        parts.append(et.replace("_", " "))
+        parts.append(str(et).replace("_", " "))
     proto = log.get("protocol", "")
     if proto:
         parts.append(f"{proto} traffic")
@@ -255,7 +279,7 @@ def log_to_text(log: dict) -> str:
         parts.append(f"{cc} connections")
     cat = log.get("threat_category", "")
     if cat and cat != "normal":
-        parts.append(f"classified as {cat.replace('_', ' ')}")
+        parts.append(f"classified as {str(cat).replace('_', ' ')}")
     return ". ".join(parts) if parts else "network traffic event"
 
 
@@ -310,19 +334,23 @@ class ZeroShotClassifier:
         self._load()
 
     def _load(self):
-        try:
-            from transformers import pipeline
-            logger.info(f"Loading HuggingFace zero-shot classifier: {self.model_name}")
-            self._pipe = pipeline(
-                "zero-shot-classification",
-                model=self.model_name,
-                device=-1,  # CPU
-            )
-            self._available = True
-            logger.info("Zero-shot classifier ready")
-        except Exception as e:
-            logger.warning(f"Zero-shot classifier unavailable: {e}. Install: pip install transformers torch")
-            self._available = False
+        def _target():
+            try:
+                from transformers import pipeline
+                logger.info(f"Loading HuggingFace zero-shot classifier: {self.model_name}")
+                self._pipe = pipeline(
+                    "zero-shot-classification",
+                    model=self.model_name,
+                    device=-1,  # CPU
+                )
+                self._available = True
+                logger.info("Zero-shot classifier ready")
+            except Exception as e:
+                logger.warning(f"Zero-shot classifier unavailable: {e}. Install: pip install transformers torch")
+                self._available = False
+        
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
 
     def classify(self, texts: list[str]) -> list[dict]:
         """Returns list of {label, score, rf_class} for each text."""
@@ -592,6 +620,8 @@ class AnomalyDetector:
                     "ml_explanation": explanation,
                     "ml_detected_at": datetime.now(timezone.utc).isoformat(),
                     "ml_score": round(float(if_score), 4),
+                    "ml_src_geo": _get_geo(log.get("src_ip", "")),
+                    "ml_dst_geo": _get_geo(log.get("dst_ip", "")),
                     "detection_method": "ml",
                 })
 

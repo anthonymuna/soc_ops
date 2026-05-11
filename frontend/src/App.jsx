@@ -10,6 +10,7 @@ import TimelineChart from './components/TimelineChart'
 import ModelStatus from './components/ModelStatus'
 import ModelTestPage from './components/ModelTestPage'
 import ReportGenerator from './components/ReportGenerator'
+import AlertMap from './components/AlertMap'
 
 export default function App() {
   const [authed, setAuthed] = useState(isLoggedIn)
@@ -35,6 +36,7 @@ export default function App() {
 
 function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
   const [tab, setTab] = useState('dashboard')
+  const [mitreFilter, setMitreFilter] = useState(null)
   const { health, stats, alerts, history, error, lastTick, refresh } = useSOC(10000, onUnauth)
 
   const isOnline = !error && health !== null
@@ -122,7 +124,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
       {error && (
         <div className="max-w-screen-xl mx-auto px-4 py-2">
           <div className="bg-rose-900/20 border border-rose-500/30 rounded text-rose-400 text-xs px-3 py-2">
-            Connection error: {error} — ensure SSH tunnel is running: <code>./deploy.sh --tunnel</code>
+            Connection error: {error}
           </div>
         </div>
       )}
@@ -178,28 +180,44 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
         {/* Timeline */}
         <TimelineChart history={history} dark={dark} />
 
-        {/* Main grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Alert feed — takes 2 cols */}
-          <div className="lg:col-span-2 h-96">
-            <AlertFeed alerts={alerts} history={history} />
+        {/* ── Main Interactive Layout ───────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          
+          {/* LEFT SIDEBAR: MITRE + Breakdown */}
+          <div className="lg:col-span-4 space-y-4">
+            <MitreHeatmap 
+              history={history} 
+              activeFilter={mitreFilter} 
+              onSelectTechnique={setMitreFilter} 
+            />
+            {history.length > 0 && <AttackClassBreakdown history={history} />}
           </div>
 
-          {/* Right panel */}
-          <div className="space-y-4">
-            <ModelStatus health={health} />
+          {/* MAIN CONTENT: Alert Feed */}
+          <div className="lg:col-span-5 h-[650px]">
+            <AlertFeed 
+              alerts={alerts} 
+              history={history} 
+              mitreFilter={mitreFilter} 
+              onClearMitre={() => setMitreFilter(null)} 
+            />
+          </div>
 
-            {/* Scan errors / quick stats */}
+          {/* RIGHT SIDEBAR: Map + AI Model Status + System */}
+          <div className="lg:col-span-3 space-y-4">
+            <AlertMap history={history} />
+            <ModelStatus health={health} />
+            
             <div className="bg-soc-panel border border-soc-border rounded-lg p-4 space-y-2">
-              <div className="text-xs font-bold text-cyan-400 uppercase tracking-widest">System</div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="text-xs font-bold text-cyan-400 uppercase tracking-widest">System Status</div>
+              <div className="grid grid-cols-1 gap-2 text-xs">
                 {[
                   ['Scan errors', stats?.scan_errors ?? 0, stats?.scan_errors > 0 ? 'text-rose-400' : 'text-slate-500'],
                   ['Last scan', stats?.last_scan?.slice(11, 19) ?? '—', 'text-slate-400'],
                   ['Last train', health?.trained_at?.slice(11, 19) ?? '—', 'text-slate-400'],
                   ['ES online', health?.es_connected ? 'YES' : 'NO', health?.es_connected ? 'text-emerald-400' : 'text-rose-400'],
                 ].map(([k, v, cls]) => (
-                  <div key={k}>
+                  <div key={k} className="flex justify-between items-center border-b border-soc-border/30 pb-1">
                     <div className="text-slate-600">{k}</div>
                     <div className={cls}>{v}</div>
                   </div>
@@ -208,12 +226,6 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
             </div>
           </div>
         </div>
-
-        {/* MITRE heatmap */}
-        <MitreHeatmap history={history} />
-
-        {/* RF class breakdown */}
-        {history.length > 0 && <AttackClassBreakdown history={history} />}
 
       </main>
 
@@ -241,7 +253,7 @@ function AttackClassBreakdown({ history }) {
   return (
     <div className="bg-soc-panel border border-soc-border rounded-lg p-4">
       <div className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-3">
-        RF Attack Classification (session)
+        RF Attack Classification
       </div>
       <div className="space-y-2">
         {sorted.map(([cls, count]) => (
@@ -253,7 +265,7 @@ function AttackClassBreakdown({ history }) {
                 style={{ width: `${(count / total) * 100}%` }}
               />
             </div>
-            <span className="text-xs text-slate-500 w-12 text-right">
+            <span className="text-xs text-slate-500 w-12 text-right text-[9px]">
               {count} ({((count / total) * 100).toFixed(0)}%)
             </span>
           </div>

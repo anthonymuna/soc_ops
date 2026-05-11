@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, X, ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronRight, X, ExternalLink, ThumbsUp, ThumbsDown, CheckCircle, Info, FileText } from 'lucide-react'
+import { getToken } from '../auth'
 
 const SEV = {
   critical: 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/40',
@@ -76,10 +77,29 @@ function AlertDetail({ alert }) {
         </div>
       </div>
 
+      {/* Geographical Info */}
+      {(alert.ml_src_geo || alert.ml_dst_geo) && (
+        <div className="flex items-center gap-4 text-slate-500 py-1">
+          {alert.ml_src_geo && (
+            <div className="flex items-center gap-1">
+              <span className="text-slate-600">Origin:</span>
+              <span className="text-cyan-400/80">{alert.ml_src_geo}</span>
+            </div>
+          )}
+          {alert.ml_dst_geo && (
+            <div className="flex items-center gap-1">
+              <span className="text-slate-600">Destination:</span>
+              <span className="text-cyan-400/80">{alert.ml_dst_geo}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Explanation */}
       {alert.ml_explanation && (
-        <div className="bg-slate-900/50 dark:bg-black/30 rounded p-2 text-slate-400 leading-relaxed">
-          {alert.ml_explanation}
+        <div className="bg-slate-900/50 dark:bg-black/30 rounded p-2 text-slate-400 leading-relaxed flex gap-2">
+          <Info className="w-3.5 h-3.5 text-cyan-500 shrink-0 mt-0.5" />
+          <span>{alert.ml_explanation}</span>
         </div>
       )}
     </div>
@@ -204,14 +224,40 @@ function IPCorrelationDrawer({ ip, history, onClose }) {
 }
 
 // ── Main AlertFeed ────────────────────────────────────────────────────────────
-export default function AlertFeed({ alerts, history = [] }) {
-  const [filter,    setFilter]    = useState('all')
+export default function AlertFeed({ alerts, history = [], mitreFilter, onClearMitre }) {
+  const [severityFilter, setSeverityFilter] = useState('all')
   const [expanded,  setExpanded]  = useState(null)
   const [ipDrawer,  setIpDrawer]  = useState(null)
+  const [feedbackSent, setFeedbackSent] = useState({})
 
-  const filtered = filter === 'all' ? alerts : alerts.filter(a => a.ml_severity === filter)
+  const filtered = alerts.filter(a => {
+    const sevMatch = severityFilter === 'all' || a.ml_severity === severityFilter
+    const mitreMatch = !mitreFilter || a.mitre_technique === mitreFilter
+    return sevMatch && mitreMatch
+  })
 
   const toggleExpand = (i) => setExpanded(prev => prev === i ? null : i)
+
+  const getAlertId = (a) => a.id || a._id || `${a.ml_detected_at}${a.src_ip}${a.event_type}`
+
+  const onFeedback = async (alert, label) => {
+    const alertId = getAlertId(alert)
+    try {
+      const resp = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/feedback`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`
+        },
+        body: JSON.stringify({ label, comment: `User manually labeled as ${label}` })
+      })
+      if (resp.ok) {
+        setFeedbackSent(prev => ({ ...prev, [alertId]: label }))
+      }
+    } catch (e) {
+      console.error("Feedback failed", e)
+    }
+  }
 
   return (
     <>
@@ -225,9 +271,9 @@ export default function AlertFeed({ alerts, history = [] }) {
             {['all','critical','high','medium','low'].map(f => (
               <button
                 key={f}
-                onClick={() => setFilter(f)}
+                onClick={() => setSeverityFilter(f)}
                 className={`text-[10px] px-2 py-0.5 rounded capitalize transition-colors
-                  ${filter === f
+                  ${severityFilter === f
                     ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/40'
                     : 'text-slate-500 hover:text-slate-300'}`}
               >
@@ -236,6 +282,21 @@ export default function AlertFeed({ alerts, history = [] }) {
             ))}
           </div>
         </div>
+
+        {/* MITRE Filter Active Status */}
+        {mitreFilter && (
+          <div className="bg-cyan-500/10 px-4 py-1.5 flex items-center justify-between border-b border-cyan-500/20">
+             <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">Technique Filter:</span>
+                <span className="text-[10px] font-mono text-cyan-300 bg-cyan-900/40 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                  {mitreFilter} - {MITRE[mitreFilter] || 'Analysis'}
+                </span>
+             </div>
+             <button onClick={onClearMitre} className="text-cyan-600 hover:text-cyan-400">
+               <X className="w-3.5 h-3.5" />
+             </button>
+          </div>
+        )}
 
         {/* list */}
         <div className="overflow-y-auto flex-1 divide-y divide-soc-border/50">
@@ -248,6 +309,7 @@ export default function AlertFeed({ alerts, history = [] }) {
             const mitreName = MITRE[a.mitre_technique] || a.mitre_technique || ''
             const rfClass   = a.ml_rf_class && a.ml_rf_class !== 'normal' ? a.ml_rf_class : null
             const isOpen    = expanded === i
+            const alertId   = getAlertId(a)
 
             return (
               <div
@@ -318,8 +380,49 @@ export default function AlertFeed({ alerts, history = [] }) {
 
                 {/* expanded detail */}
                 {isOpen && (
-                  <div className="pl-5">
+                  <div className="pl-5 pb-2">
                     <AlertDetail alert={a} />
+                    
+                    {/* Feedback Buttons */}
+                    <div className="mt-4 flex items-center gap-2">
+                      {(a.human_labeled || feedbackSent[alertId]) ? (
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-1.5 text-cyan-400 text-[10px] font-bold uppercase tracking-widest bg-cyan-400/10 px-2 py-1 rounded border border-cyan-400/30">
+                            <CheckCircle className="w-3 h-3" />
+                            {(a.human_labeled || feedbackSent[alertId]) === 'normal' ? 'Labled Normal' : 'Confirmed Threat'}
+                          </span>
+                          
+                          {(a.human_labeled || feedbackSent[alertId]) !== 'normal' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); window.open(`/api/alerts/${encodeURIComponent(alertId)}/report`, '_blank') }}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all text-[10px] font-bold uppercase"
+                            >
+                              <FileText className="w-3 h-3" />
+                              Download Intel Report
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onFeedback(a, a.ml_rf_class || 'attack') }}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition-all text-[10px]"
+                            title="Confirm this is a real threat"
+                          >
+                            <ThumbsUp className="w-3 h-3" />
+                            CONFIRM THREAT
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onFeedback(a, 'normal') }}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded bg-slate-500/10 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 transition-all text-[10px]"
+                            title="Mark as false positive / normal traffic"
+                          >
+                            <ThumbsDown className="w-3 h-3" />
+                            DISMISS (FALSE POSITIVE)
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
