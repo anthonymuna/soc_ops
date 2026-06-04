@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme tokens ──────────────────────────────────────────────── */
+:root {
+  /* Light theme (default) */
+  --soc-bg:     248 250 252;   /* slate-50   #f8fafc */
+  --soc-panel:  255 255 255;   /* white      #ffffff */
+  --soc-border: 226 232 240;   /* slate-200  #e2e8f0 */
+  --soc-accent: 2 132 199;     /* sky-600    #0284c7 */
+  --soc-green:  5 150 105;     /* emerald-600 #059669 */
+  --soc-red:    225 29 72;     /* rose-600   #e11d48 */
+  --soc-yellow: 217 119 6;     /* amber-600  #d97706 */
+  --soc-purple: 109 40 217;    /* violet-600 #6d28d9 */
+}
+
+html.dark {
+  --soc-bg:     10 14 26;      /* #0a0e1a */
+  --soc-panel:  15 22 41;      /* #0f1629 */
+  --soc-border: 30 45 74;      /* #1e2d4a */
+  --soc-accent: 0 212 255;     /* #00d4ff */
+  --soc-green:  0 255 136;     /* #00ff88 */
+  --soc-red:    255 51 102;    /* #ff3366 */
+  --soc-yellow: 255 170 0;     /* #ffaa00 */
+  --soc-purple: 124 58 237;    /* #7c3aed */
+}
+
+/* ── Base ──────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+body {
+  background-color: rgb(var(--soc-bg));
+  color: #1e293b;
+  font-family: 'Inter', system-ui, sans-serif;
+  margin: 0;
+  overflow-x: hidden;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+html.dark body { color: #e2e8f0; }
+
+/* ── Light mode text-* overrides (low-contrast 400 variants) ───── */
+html:not(.dark) .text-cyan-400   { color: #0284c7; }
+html:not(.dark) .text-cyan-700   { color: #0369a1; }
+html:not(.dark) .text-emerald-400 { color: #059669; }
+html:not(.dark) .text-rose-400   { color: #e11d48; }
+html:not(.dark) .text-amber-400  { color: #b45309; }
+html:not(.dark) .text-purple-400 { color: #7c3aed; }
+html:not(.dark) .text-slate-200  { color: #1e293b; }
+html:not(.dark) .text-slate-300  { color: #374151; }
+html:not(.dark) .text-slate-400  { color: #4b5563; }
+html:not(.dark) .text-slate-500  { color: #6b7280; }
+html:not(.dark) .text-slate-600  { color: #9ca3af; }
+html:not(.dark) .text-slate-700  { color: #6b7280; }
+
+/* ── Light mode hover fixes ────────────────────────────────────── */
+html:not(.dark) .hover\:text-slate-300:hover { color: #1e293b; }
+html:not(.dark) .hover\:bg-white\/\[0\.02\]:hover { background-color: rgb(0 0 0 / 0.03); }
+
+/* ── Light mode panel depth ────────────────────────────────────── */
+html:not(.dark) .bg-soc-panel {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: rgb(var(--soc-bg)); }
+::-webkit-scrollbar-thumb { background: rgb(var(--soc-border)); border-radius: 2px; }
+
+/* ── Grid background ────────────────────────────────────────────── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgb(var(--soc-border) / 0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--soc-border) / 0.4) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Animations ─────────────────────────────────────────────────── */
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.3); }
+  50%       { box-shadow: 0 0 0 6px rgba(225, 29, 72, 0); }
+}
+.alert-critical { animation: pulse-red 2s infinite; }

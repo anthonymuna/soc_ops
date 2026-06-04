@@ -1,0 +1,233 @@
+version: '3.8'
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: syndicate4-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - syndicate4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+#  logstash:
+#    image: docker.elastic.co/logstash/logstash:8.12.0
+#    container_name: syndicate4-logstash
+#    volumes:
+#      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+#    ports:
+#      - "5044:5044"
+#      - "5000:5000/udp"
+#      - "9600:9600"
+#    environment:
+#      - LS_JAVA_OPTS=-Xmx256m -Xms256m
+#      - XPACK_MONITORING_ENABLED=false
+#    networks:
+#      - syndicate4
+#    depends_on:
+#      elasticsearch:
+#        condition: service_healthy
+#    restart: unless-stopped
+#    healthcheck:
+#      test: ["CMD-SHELL", "curl -sf http://localhost:9600 || exit 1"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 5
+#      start_period: 90s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.0
+    container_name: syndicate4-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=syndicate4encryptionkey32chars!!
+      - TELEMETRY_ENABLED=false
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  ml_service:
+    build: ./ml_service
+    container_name: syndicate4-ml
+    ports:
+      - "8000:8000"
+    environment:
+      - ES_HOST=http://elasticsearch:9200
+      - TRAIN_INTERVAL_SECONDS=300
+      - SCAN_INTERVAL_SECONDS=15
+      - CONTAMINATION=0.05
+      - AUTH_USERNAME=admin
+      - AUTH_PASSWORD=admin
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - mlmodels:/app/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+#  simulator:
+#    build: ./simulator
+#    container_name: syndicate4-simulator
+#    environment:
+#      - LOGSTASH_HOST=logstash
+#      - LOGSTASH_PORT=5000
+#      - NORMAL_RATE=2.0
+#      - ATTACK_PROBABILITY=0.08
+#    networks:
+#      - syndicate4
+#    depends_on:
+#      logstash:
+#        condition: service_healthy
+#    restart: unless-stopped
+#
+#  atomic_runner:
+#    build: ./atomic_runner
+#    container_name: syndicate4-atomic
+#    environment:
+#      - LOGSTASH_HOST=logstash
+#      - LOGSTASH_PORT=5000
+#    networks:
+#      - syndicate4
+#    depends_on:
+#      logstash:
+#        condition: service_healthy
+#    restart: unless-stopped
+#    # Net admin cap for nmap/scanning
+#    cap_add:
+#      - NET_ADMIN
+#      - NET_RAW
+#    volumes:
+#      - /tmp/atomic-runner:/tmp/atomic-runner
+
+#  filebeat:
+#    image: docker.elastic.co/beats/filebeat:8.12.0
+#    container_name: syndicate4-filebeat
+#    user: root
+#    volumes:
+#      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+#      - /var/log:/host/var/log:ro
+#      - /tmp/atomic-runner:/host/tmp/atomic-runner:ro
+#    networks:
+#      - syndicate4
+#    depends_on:
+#      logstash:
+#        condition: service_healthy
+#    restart: unless-stopped
+#    command: ["filebeat", "-e", "--strict.perms=false"]
+
+  frontend:
+    build:
+      context: ./frontend
+      target: build
+    container_name: syndicate4-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    networks:
+      - syndicate4
+    depends_on:
+      - ml_service
+    restart: unless-stopped
+
+  responder:
+    build: ./responder
+    container_name: syndicate4-responder
+    ports:
+      - "8001:8001"
+    extra_hosts:
+      - "host-gateway:host-gateway"
+    environment:
+      - ES_HOST=http://elasticsearch:9200
+      - PFSENSE_URL=${PFSENSE_URL:-http://host-gateway:8080}
+      - PFSENSE_API_KEY=${PFSENSE_API_KEY:-}
+      - PFSENSE_ALIAS=syndicate4_blocklist
+      - BLOCK_SEVERITIES=critical,high
+      # CRITICAL: add your management IP here before setting DRY_RUN=false
+      # e.g. NEVER_BLOCK=10.104.4.0/24,YOUR.MGMT.IP.HERE
+      - NEVER_BLOCK=${NEVER_BLOCK:-10.104.4.0/24}
+      - POLL_INTERVAL=10
+      - DRY_RUN=${DRY_RUN:-true}
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health',timeout=3).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  wazuh_connector:
+    build: ./wazuh_connector
+    container_name: syndicate4-wazuh-connector
+    environment:
+      - WAZUH_API_URL=https://127.0.0.1:55000
+      - WAZUH_JWT_TOKEN=eyJhbGciOiJFUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3YXp1aCIsImF1ZCI6IldhenVoIEFQSSBSRVNUIiwibmJmIjoxNzgwNTczMTM4LCJleHAiOjE4MTIxMDkxMzgsInN1YiI6IndhenVoIiwicnVuX2FzIjpmYWxzZSwicmJhY19yb2xlcyI6WzFdLCJyYmFjX21vZGUiOiJ3aGl0ZSJ9.AUthOjCqd7A0LPF6T8CbIxUkWWl352mSp2Yqus_rssqXHNdmkLi4QH6R6ptsPD2GU85N7ka4am1k-K7pQ9DL0DsiAIBwQH36FWvJYUuZt-7HB8qaYqFS-L7vZB3Kpb7PRteszjIl4Jv0VsZJDe-iKg6S_TvR37og28TbpfnFQtKOzOWK
+      - WAZUH_INDEXER_HOST=https://127.0.0.1:9201
+      - WAZUH_INDEXER_USER=${WAZUH_INDEXER_USER:-admin}
+      - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASS:-}
+      - WAZUH_ALERTS_ENABLED=${WAZUH_ALERTS_ENABLED:-true}
+      - ES_HOST=http://elasticsearch:9200
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  syndicate4:
+    driver: bridge
+
+volumes:
+  esdata:
+    driver: local
+  mlmodels:
+    driver: local
