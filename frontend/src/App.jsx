@@ -53,7 +53,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
       <header className="border-b border-soc-border bg-soc-panel/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Shield className="text-cyan-400 w-5 h-5" />
+            <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 object-contain rounded bg-white/5" />
             <span className="font-bold text-cyan-400 tracking-widest text-sm">NGAO SOC</span>
             <span className="text-slate-600 text-xs hidden sm:inline">AI-BASED CYBER THREAT DETECTION</span>
             <div className="hidden sm:flex items-center gap-1 ml-2">

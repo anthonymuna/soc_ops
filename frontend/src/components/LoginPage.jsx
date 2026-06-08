@@ -32,10 +32,8 @@ export default function LoginPage({ onLogin }) {
       <div className="relative w-full max-w-sm">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl
-                          bg-sky-50 border border-sky-200 dark:bg-cyan-400/10 dark:border-cyan-400/20 mb-4
-                          shadow-sm">
-            <Shield className="w-8 h-8 text-sky-600 dark:text-cyan-400" />
+          <div className="inline-flex items-center justify-center w-20 h-20 mb-4 bg-white/5 rounded-xl">
+            <img src="/logo.jpeg" alt="Logo" className="w-full h-full object-contain rounded-xl shadow-md" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 tracking-widest">
             NGAO SOC
