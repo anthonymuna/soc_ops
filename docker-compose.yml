@@ -90,6 +90,7 @@ services:
       target: build
     container_name: syndicate4-frontend
     ports:
+      - "80:3000"
       - "3000:3000"
     volumes:
       - ./frontend:/app
