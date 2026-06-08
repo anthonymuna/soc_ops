@@ -259,6 +259,20 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
     })
   }
 
+  // Deduplicate alerts with same source IP, destination IP, and event type/description
+  const dedupMap = new Map();
+  const dedupedFiltered = [];
+  for (const a of filtered) {
+    const key = [a.src_ip, a.dst_ip, a.event_type, a.wazuh_description || a.mitre_technique || ''].join('|');
+    if (dedupMap.has(key)) {
+      dedupMap.get(key)._count += 1;
+    } else {
+      const copy = { ...a, _count: 1 };
+      dedupMap.set(key, copy);
+      dedupedFiltered.push(copy);
+    }
+  }
+
   const toggleExpand = (i) => setExpanded(prev => prev === i ? null : i)
 
   const getAlertId = (a) => a.id || a._id || `${a.ml_detected_at}${a.src_ip}${a.event_type}`
@@ -308,11 +322,11 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
 
         {/* list */}
         <div className="overflow-y-auto flex-1 divide-y divide-soc-border/50">
-          {filtered.length === 0 && (
+          {dedupedFiltered.length === 0 && (
             <div className="p-6 text-center text-slate-600 text-sm">No alerts matching filter</div>
           )}
 
-          {filtered.map((a, i) => {
+          {dedupedFiltered.map((a, i) => {
             const ts        = (a.ml_detected_at || a['@timestamp'] || '').slice(11, 19)
             let ids = [];
             if (Array.isArray(a.mitre_id)) ids.push(...a.mitre_id);
@@ -353,6 +367,11 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
                     }
                     <Badge sev={a.ml_severity} />
                     <span className="text-slate-300 font-semibold truncate">{a.event_type}</span>
+                    {a._count > 1 && (
+                      <span className="bg-slate-700/50 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full ml-1 border border-slate-600/50 font-bold">
+                        {a._count}x
+                      </span>
+                    )}
                     {rfClass && (
                       <span className="text-purple-400 text-[10px]">[{rfClass.toUpperCase()}]</span>
                     )}

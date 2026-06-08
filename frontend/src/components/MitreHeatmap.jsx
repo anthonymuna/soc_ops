@@ -105,19 +105,19 @@ export default function MitreHeatmap({ history, selectedMitreId, onSelectMitreId
               key={t.id}
               title={`${t.id}: ${t.name} — ${count} hits`}
               onClick={() => {
-                if (count > 0 && onSelectMitreId) {
+                if (onSelectMitreId) {
                   onSelectMitreId(isSelected ? null : t.id)
                 }
               }}
               className={`bg-gradient-to-br ${colors} border rounded p-1.5 text-center transition-all duration-300
-                ${count > 0 ? 'ring-1 ring-white/10 cursor-pointer hover:brightness-125' : 'opacity-40 cursor-default'}
-                ${isSelected ? 'ring-2 ring-cyan-400 scale-105 brightness-150 shadow-lg z-10 relative' : ''}`}
-              style={{ opacity: isSelected ? 1 : (count > 0 ? 0.4 + heat * 0.6 : 0.2) }}
+                cursor-pointer hover:brightness-125 hover:ring-1 hover:ring-white/30
+                ${isSelected ? 'ring-2 ring-cyan-400 scale-105 brightness-110 shadow-lg z-10 relative' : ''}`}
+              style={{ opacity: isSelected ? 1 : (count > 0 ? 0.8 + heat * 0.2 : 0.6) }}
             >
-              <div className="text-[9px] font-bold text-slate-600 dark:text-slate-400">{t.id}</div>
-              <div className="text-[8px] leading-tight mt-0.5 text-slate-500 dark:text-slate-500">{t.name}</div>
+              <div className="text-[10px] font-bold text-slate-800 dark:text-slate-200">{t.id}</div>
+              <div className="text-[9px] font-semibold leading-tight mt-0.5 text-slate-700 dark:text-slate-300">{t.name}</div>
               {count > 0 && (
-                <div className="text-[10px] font-bold mt-1 text-slate-800 dark:text-white">{count}</div>
+                <div className="text-[11px] font-black mt-1 text-slate-900 dark:text-white">{count}</div>
               )}
             </div>
           )
