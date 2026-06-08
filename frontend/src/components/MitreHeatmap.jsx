@@ -5,6 +5,7 @@ const TECHNIQUES = [
   { id: 'T1057',     name: 'Proc Disc',     tactic: 'Discovery' },
   { id: 'T1082',     name: 'Sys Info',      tactic: 'Discovery' },
   { id: 'T1083',     name: 'File Disc',     tactic: 'Discovery' },
+  { id: 'T1078',     name: 'Valid Accts',   tactic: 'Credential' },
   { id: 'T1110',     name: 'Brute Force',   tactic: 'Credential' },
   { id: 'T1110.001', name: 'Pwd Guess',     tactic: 'Credential' },
   { id: 'T1021',     name: 'Remote Svc',    tactic: 'Lateral' },
@@ -33,15 +34,33 @@ export default function MitreHeatmap({ history, selectedMitreId, onSelectMitreId
   const [activeTactic, setActiveTactic] = useState(null)
 
   const counts = {}
+  const evtMap = {
+    port_scan: 'T1046', brute_force: 'T1110', lateral_movement: 'T1021.002',
+    data_exfil: 'T1041', c2_beacon: 'T1071', recon: 'T1018',
+  }
+  
   for (const alert of history) {
-    const t = alert.mitre_technique
-    if (t) counts[t] = (counts[t] || 0) + 1
-    const evtMap = {
-      port_scan: 'T1046', brute_force: 'T1110', lateral_movement: 'T1021.002',
-      data_exfil: 'T1041', c2_beacon: 'T1071', recon: 'T1018',
+    let ids = [];
+    if (Array.isArray(alert.mitre_id)) ids.push(...alert.mitre_id);
+    else if (typeof alert.mitre_id === 'string') ids.push(alert.mitre_id);
+    
+    if (ids.length === 0) {
+      const tech = alert.mitre_technique;
+      if (Array.isArray(tech)) {
+        ids.push(...tech.filter(x => typeof x === 'string' && x.startsWith('T')));
+      } else if (typeof tech === 'string' && tech.startsWith('T')) {
+        ids.push(tech);
+      }
     }
-    const mapped = evtMap[alert.event_type]
-    if (mapped && !t) counts[mapped] = (counts[mapped] || 0) + 1
+    
+    if (ids.length === 0) {
+      const mapped = evtMap[alert.event_type];
+      if (mapped) ids.push(mapped);
+    }
+    
+    for (const id of ids) {
+      counts[id] = (counts[id] || 0) + 1;
+    }
   }
 
   const visibleTechniques = activeTactic

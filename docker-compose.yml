@@ -31,30 +31,7 @@ services:
       retries: 10
       start_period: 60s
 
-#  logstash:
-#    image: docker.elastic.co/logstash/logstash:8.12.0
-#    container_name: syndicate4-logstash
-#    volumes:
-#      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
-#    ports:
-#      - "5044:5044"
-#      - "5000:5000/udp"
-#      - "9600:9600"
-#    environment:
-#      - LS_JAVA_OPTS=-Xmx256m -Xms256m
-#      - XPACK_MONITORING_ENABLED=false
-#    networks:
-#      - syndicate4
-#    depends_on:
-#      elasticsearch:
-#        condition: service_healthy
-#    restart: unless-stopped
-#    healthcheck:
-#      test: ["CMD-SHELL", "curl -sf http://localhost:9600 || exit 1"]
-#      interval: 30s
-#      timeout: 10s
-#      retries: 5
-#      start_period: 90s
+
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.12.0
@@ -106,55 +83,6 @@ services:
       retries: 5
       start_period: 60s
 
-#  simulator:
-#    build: ./simulator
-#    container_name: syndicate4-simulator
-#    environment:
-#      - LOGSTASH_HOST=logstash
-#      - LOGSTASH_PORT=5000
-#      - NORMAL_RATE=2.0
-#      - ATTACK_PROBABILITY=0.08
-#    networks:
-#      - syndicate4
-#    depends_on:
-#      logstash:
-#        condition: service_healthy
-#    restart: unless-stopped
-#
-#  atomic_runner:
-#    build: ./atomic_runner
-#    container_name: syndicate4-atomic
-#    environment:
-#      - LOGSTASH_HOST=logstash
-#      - LOGSTASH_PORT=5000
-#    networks:
-#      - syndicate4
-#    depends_on:
-#      logstash:
-#        condition: service_healthy
-#    restart: unless-stopped
-#    # Net admin cap for nmap/scanning
-#    cap_add:
-#      - NET_ADMIN
-#      - NET_RAW
-#    volumes:
-#      - /tmp/atomic-runner:/tmp/atomic-runner
-
-#  filebeat:
-#    image: docker.elastic.co/beats/filebeat:8.12.0
-#    container_name: syndicate4-filebeat
-#    user: root
-#    volumes:
-#      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-#      - /var/log:/host/var/log:ro
-#      - /tmp/atomic-runner:/host/tmp/atomic-runner:ro
-#    networks:
-#      - syndicate4
-#    depends_on:
-#      logstash:
-#        condition: service_healthy
-#    restart: unless-stopped
-#    command: ["filebeat", "-e", "--strict.perms=false"]
 
   frontend:
     build:

@@ -114,121 +114,106 @@ class SocPDF(FPDF):
 # ── main build function ────────────────────────────────────────────────────────
 
 def build_report(es_client: Elasticsearch, hours: int = 24) -> bytes:
-    """Build a professional aggregate intelligence report for the dashboard."""
+    """Build a professional 2-paragraph aggregate intelligence report."""
     now = datetime.now(timezone.utc)
     since = (now - timedelta(hours=hours)).isoformat()
 
-    # ── 1. Pull data from ES ──────────────────────────────────────────────────
+    # Total logs
+    try:
+        total_logs = es_client.count(index="syndicate4-logs-*")["count"]
+    except Exception:
+        total_logs = 0
 
-    # Total log count
-    total_logs = es_client.count(index="syndicate4-logs-*")["count"]
-
-    # Alert summary by severity
-    sev_agg = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {"range": {"ml_detected_at": {"gte": since}}},
-            "size": 0,
-            "aggs": {
-                "by_sev": {"terms": {"field": "ml_severity.keyword", "size": 10}},
+    # Alerts by severity, mitre, class, ip
+    try:
+        sev_agg = es_client.search(
+            index="syndicate4-ml-alerts",
+            body={
+                "query": {"range": {"ml_detected_at": {"gte": since}}},
+                "size": 0,
+                "aggs": {
+                    "by_sev": {"terms": {"field": "ml_severity.keyword", "size": 10}},
+                    "by_mitre": {"terms": {"field": "mitre_technique.keyword", "size": 5}},
+                    "by_class": {"terms": {"field": "ml_rf_class.keyword", "size": 5}},
+                    "by_ip": {"terms": {"field": "src_ip.keyword", "size": 5}}
+                },
             },
-        },
-    )
-    sev_buckets = {b["key"]: b["doc_count"]
-                   for b in sev_agg["aggregations"]["by_sev"]["buckets"]}
-    total_alerts = sev_agg["hits"]["total"]["value"]
+        )
+        total_alerts = sev_agg["hits"]["total"]["value"]
+        aggs = sev_agg.get("aggregations", {})
+        sev_buckets = {b["key"]: b["doc_count"] for b in aggs.get("by_sev", {}).get("buckets", [])}
+        mitre_hits = [b["key"] for b in aggs.get("by_mitre", {}).get("buckets", []) if b["key"] != "normal"]
+        class_hits = [b["key"] for b in aggs.get("by_class", {}).get("buckets", []) if b["key"] != "normal"]
+        top_ips = [b["key"] for b in aggs.get("by_ip", {}).get("buckets", [])]
+    except Exception:
+        total_alerts = 0
+        sev_buckets = {}
+        mitre_hits = []
+        class_hits = []
+        top_ips = []
 
-    # Alert timeline (hourly buckets)
-    timeline_agg = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {"range": {"ml_detected_at": {"gte": since}}},
-            "size": 0,
-            "aggs": {
-                "by_hour": {
-                    "date_histogram": {
-                        "field": "ml_detected_at",
-                        "calendar_interval": "1h",
-                        "min_doc_count": 0,
-                        "extended_bounds": {"min": since, "max": now.isoformat()},
-                    }
-                }
-            },
-        },
-    )
-    hourly = [(b["key_as_string"][11:16], b["doc_count"])
-              for b in timeline_agg["aggregations"]["by_hour"]["buckets"]]
+    mitre_names_dict = {
+        "T1046": "Network Scanning", 
+        "T1110": "Brute Force", 
+        "T1110.001": "Password Guessing",
+        "T1021": "Lateral Movement", 
+        "T1021.002": "SMB Lateral Movement",
+        "T1041": "Data Exfiltration", 
+        "T1071": "C2 Beaconing", 
+        "T1018": "Reconnaissance",
+        "T1049": "Network Discovery", 
+        "T1057": "Process Discovery", 
+        "T1082": "System Info Discovery",
+        "T1083": "File Discovery", 
+        "T1105": "Tool Transfer", 
+        "T1059": "Malicious Execution",
+        "T1498": "Denial of Service (DoS)", 
+        "T1498.001": "SYN Flood", 
+        "T1190": "Exploiting Public-Facing Application",
+        "T1048": "Exfiltration Over Alternative Protocol", 
+        "T1068": "Privilege Escalation", 
+        "T1571": "Non-Standard Port Usage",
+        "T1078": "Valid Accounts"
+    }
 
-    # MITRE technique hits
-    mitre_agg = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {"range": {"ml_detected_at": {"gte": since}}},
-            "size": 0,
-            "aggs": {"by_mitre": {"terms": {"field": "mitre_technique.keyword", "size": 20}}},
-        },
-    )
-    mitre_hits = [(b["key"], b["doc_count"])
-                  for b in mitre_agg["aggregations"]["by_mitre"]["buckets"]]
+    crit_high = sev_buckets.get("critical", 0) + sev_buckets.get("high", 0)
+    class_str = ", ".join(class_hits).upper() if class_hits else "various anomalous activities"
+    mitre_names = [mitre_names_dict.get(k, k) for k in mitre_hits]
+    mitre_str = ", ".join(mitre_names) if mitre_names else "multiple vectors"
+    ip_str = ", ".join(top_ips) if top_ips else "unknown sources"
 
-    # Attack class distribution
-    class_agg = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {"range": {"ml_detected_at": {"gte": since}}},
-            "size": 0,
-            "aggs": {"by_class": {"terms": {"field": "ml_rf_class.keyword", "size": 10}}},
-        },
-    )
-    class_hits = [(b["key"], b["doc_count"])
-                  for b in class_agg["aggregations"]["by_class"]["buckets"]]
+    p1 = (f"Over the past {hours} hours, the NGAO SOC AI Engine analyzed {total_logs:,} events and detected "
+          f"{total_alerts:,} security alerts, including {crit_high} critical or high severity threats. "
+          f"The primary threat classifications identified were {class_str}, utilizing MITRE ATT&CK techniques "
+          f"such as {mitre_str}. The majority of these malicious activities originated from source IPs: {ip_str}, "
+          f"indicating targeted or automated scanning and exploitation attempts against the network infrastructure.")
 
-    # Top source IPs
-    ip_agg = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {"range": {"ml_detected_at": {"gte": since}}},
-            "size": 0,
-            "aggs": {"by_ip": {"terms": {"field": "src_ip.keyword", "size": 10}}},
-        },
-    )
-    top_ips = [(b["key"], b["doc_count"])
-               for b in ip_agg["aggregations"]["by_ip"]["buckets"]]
+    recs = []
+    if "dos" in class_hits or "flood" in class_str.lower():
+        recs.append("implementing strict rate limiting and enabling DDoS protection on edge routers")
+    if "probe" in class_hits or "recon" in mitre_str.lower() or "discovery" in mitre_str.lower():
+        recs.append("blocking persistent scanning IPs at the firewall and auditing external exposed services")
+    if "r2l" in class_hits or "valid accounts" in mitre_str.lower() or "brute force" in mitre_str.lower():
+        recs.append("enforcing Multi-Factor Authentication (MFA) and reviewing recent failed login thresholds")
+    if "u2r" in class_hits or "privilege escalation" in mitre_str.lower() or "execution" in mitre_str.lower():
+        recs.append("isolating affected internal hosts immediately and rotating administrative credentials")
+    
+    if not recs:
+        recs = ["monitoring anomalous IP traffic", "validating security group rules", "ensuring all systems are fully patched"]
+        
+    if len(recs) > 1:
+        recs_str = ", ".join(recs[:-1]) + ", and " + recs[-1]
+    else:
+        recs_str = recs[0]
 
-    # Top event types
-    etype_agg = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {"range": {"ml_detected_at": {"gte": since}}},
-            "size": 0,
-            "aggs": {"by_type": {"terms": {"field": "event_type.keyword", "size": 10}}},
-        },
-    )
-    top_types = [(b["key"], b["doc_count"])
-                 for b in etype_agg["aggregations"]["by_type"]["buckets"]]
+    p2 = (f"To mitigate these identified threats and secure the environment, it is strongly recommended to "
+          f"take immediate action by {recs_str}. Furthermore, security teams should "
+          f"review the specific alerts associated with the high-risk IPs ({ip_str}) to identify compromised accounts "
+          f"or internal lateral movement, ensuring that baseline network access policies are strictly enforced.")
 
-    # Recent critical alerts
-    recent = es_client.search(
-        index="syndicate4-ml-alerts",
-        body={
-            "query": {
-                "bool": {
-                    "must": [{"range": {"ml_detected_at": {"gte": since}}}],
-                    "should": [{"term": {"ml_severity.keyword": "critical"}},
-                               {"term": {"ml_severity.keyword": "high"}}],
-                    "minimum_should_match": 1,
-                }
-            },
-            "size": 30,
-            "sort": [{"ml_detected_at": {"order": "desc"}}],
-        },
-    )
-    recent_alerts = [h["_source"] for h in recent["hits"]["hits"]]
-
-    # ── 2. Build PDF ──────────────────────────────────────────────────────────
     pdf = SocPDF(hours)
     pdf.add_page()
-
+    
     # Cover / title block
     pdf.set_fill_color(*C_BG)
     pdf.rect(0, 14, 210, 40, "F")
@@ -238,155 +223,23 @@ def build_report(es_client: Elasticsearch, hours: int = 24) -> bytes:
     pdf.cell(0, 10, "NGAO SOC", align="C", ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(*C_DIM)
-    pdf.cell(0, 6, "AI-Based Cyber Threat Detection — Threat Intelligence Report", align="C", ln=True)
+    pdf.cell(0, 6, "AI-Based Cyber Threat Detection - Executive Summary Report", align="C", ln=True)
     pdf.set_font("Helvetica", "", 8)
     pdf.cell(0, 5, f"Period: last {hours}h  |  Generated: {now.strftime('%Y-%m-%d %H:%M UTC')}",
              align="C", ln=True)
     pdf.ln(18)
 
-    # ── Executive summary ─────────────────────────────────────────────────────
-    pdf.section("EXECUTIVE SUMMARY")
-    pdf.kv_row("Total logs in ES",     f"{total_logs:,}")
-    pdf.kv_row(f"Alerts (last {hours}h)", f"{total_alerts:,}")
-    pdf.kv_row("Critical",  str(sev_buckets.get("critical", 0)), C_RED)
-    pdf.kv_row("High",      str(sev_buckets.get("high", 0)),     C_YELLOW)
-    pdf.kv_row("Medium",    str(sev_buckets.get("medium", 0)),   C_PURPLE)
-    pdf.kv_row("Low",       str(sev_buckets.get("low", 0)),      C_DIM)
-    pdf.kv_row("Report period", f"{since[:10]} to {now.strftime('%Y-%m-%d')}")
+    pdf.section("THREAT INTELLIGENCE SUMMARY")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*C_TEXT)
+    pdf.multi_cell(0, 6, p1)
+    pdf.ln(4)
 
-    # ── Alert timeline ────────────────────────────────────────────────────────
-    if hourly:
-        pdf.section(f"ALERT TIMELINE (last {hours}h - hourly)")
-        max_h = max(c for _, c in hourly) if hourly else 1
-        graph_h = 40
-        graph_w = 170
-        x0, y0 = 14, pdf.get_y()
-        col_w = graph_w / max(len(hourly), 1)
-
-        # background
-        pdf.set_fill_color(*C_PANEL)
-        pdf.rect(x0, y0, graph_w, graph_h, "F")
-
-        for i, (label, cnt) in enumerate(hourly):
-            bh = int((cnt / max(max_h, 1)) * (graph_h - 6))
-            bx = x0 + i * col_w + 1
-            by = y0 + graph_h - bh - 1
-            color = C_RED if cnt > (max_h * 0.7) else C_YELLOW if cnt > (max_h * 0.3) else C_ACCENT
-            pdf.set_fill_color(*color)
-            if bh > 0:
-                pdf.rect(bx, by, max(col_w - 2, 1), bh, "F")
-
-        # x-axis labels (every 4h)
-        pdf.set_font("Helvetica", "", 5)
-        pdf.set_text_color(*C_DIM)
-        for i, (label, _) in enumerate(hourly):
-            if i % 4 == 0:
-                pdf.set_xy(x0 + i * col_w, y0 + graph_h + 1)
-                pdf.cell(col_w * 4, 4, label)
-
-        pdf.set_y(y0 + graph_h + 6)
-
-    # ── MITRE ATT&CK ─────────────────────────────────────────────────────────
-    if mitre_hits:
-        pdf.section("MITRE ATT&CK TECHNIQUE HITS")
-        total_m = sum(c for _, c in mitre_hits)
-        for tid, cnt in mitre_hits[:15]:
-            pdf.bar(tid, cnt, total_m, C_ACCENT)
-
-    # ── Attack class breakdown ────────────────────────────────────────────────
-    if class_hits:
-        pdf.section("RF ATTACK CLASSIFICATION")
-        total_c = sum(c for _, c in class_hits)
-        for cls, cnt in class_hits:
-            pdf.bar(cls.upper(), cnt, total_c, CLASS_COLOR.get(cls, C_DIM))
-
-    # ── Top event types ───────────────────────────────────────────────────────
-    if top_types:
-        pdf.section("TOP EVENT TYPES")
-        total_t = sum(c for _, c in top_types)
-        for etype, cnt in top_types[:10]:
-            pdf.bar(etype, cnt, total_t, C_PURPLE)
-
-    # ── Top source IPs ────────────────────────────────────────────────────────
-    if top_ips:
-        pdf.section("TOP SOURCE IPs (alerts)")
-        total_i = sum(c for _, c in top_ips)
-        for ip, cnt in top_ips[:10]:
-            pdf.bar(ip, cnt, total_i, C_RED)
-
-    # ── Recent critical/high alerts ───────────────────────────────────────────
-    if recent_alerts:
-        pdf.section("RECENT CRITICAL / HIGH ALERTS")
-        col_widths = [22, 18, 35, 22, 32, 20]
-        headers    = ["Time", "Severity", "Event Type", "MITRE", "Src IP", "Score"]
-
-        # header row
-        pdf.set_fill_color(*C_PANEL)
-        pdf.set_font("Helvetica", "B", 7)
-        pdf.set_text_color(*C_ACCENT)
-        for w, h in zip(col_widths, headers):
-            pdf.cell(w, 5, h, border=0, fill=True)
-        pdf.ln()
-
-        pdf.set_font("Helvetica", "", 7)
-        for i, a in enumerate(recent_alerts[:25]):
-            sev = a.get("ml_severity", "low")
-            if i % 2 == 0:
-                pdf.set_fill_color(*C_PANEL)
-            else:
-                pdf.set_fill_color(*C_BG)
-
-            row = [
-                (a.get("ml_detected_at") or a.get("timestamp") or "")[:19].replace("T", " ")[11:],
-                sev.upper(),
-                (a.get("event_type") or "-")[:22],
-                a.get("mitre_technique") or "-",
-                (a.get("src_ip") or "-")[:20],
-                f"{a.get('ml_score', 0):.3f}",
-            ]
-            pdf.set_text_color(*SEV_COLOR.get(sev, C_DIM) if row[1] != "-" else C_DIM)
-            pdf.cell(col_widths[0], 5, row[0], fill=True)
-            pdf.set_text_color(*SEV_COLOR.get(sev, C_WHITE))
-            pdf.cell(col_widths[1], 5, row[1], fill=True)
-            pdf.set_text_color(*C_WHITE)
-            for w, v in zip(col_widths[2:], row[2:]):
-                pdf.cell(w, 5, v, fill=True)
-            pdf.ln()
-
-    # ── Forensics / AI Reasoning ──────────────────────────────────────────────
-    if recent_alerts:
-        pdf.add_page()
-        pdf.section("FORENSICS & AI REASONING (Deep Dive)")
-        pdf.set_font("Helvetica", "", 7)
-        pdf.set_text_color(*C_DIM)
-        pdf.multi_cell(0, 4, "Detailed analysis of top threats using the hybrid ML pipeline (IsolationForest + Random Forest + Zero-Shot NLI).", ln=True)
-        pdf.ln(2)
-
-        for i, a in enumerate(recent_alerts[:15]):
-            pdf.set_fill_color(*C_PANEL)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(*C_ACCENT)
-            time_str = (a.get("ml_detected_at") or "")[11:19]
-            pdf.cell(0, 6, f" {time_str} | {a.get('event_type','unknown').upper()} | {a.get('ml_rf_class','anomaly').upper()}", fill=True, ln=True)
-            
-            pdf.set_font("Helvetica", "", 7)
-            pdf.set_text_color(*C_WHITE)
-            pdf.ln(1)
-            pdf.set_text_color(*C_WHITE)
-            pdf.cell(35, 4, "Explanation:", ln=False)
-            pdf.set_text_color(*C_DIM)
-            pdf.multi_cell(145, 4, a.get("ml_explanation", "No explanation provided."), ln=True)
-            
-            pdf.set_text_color(*C_WHITE)
-            pdf.cell(30, 4, "Connectivity:", ln=False)
-            pdf.set_text_color(*C_DIM)
-            src_geo = a.get("ml_src_geo", "Unknown")
-            dst_geo = a.get("ml_dst_geo", "Unknown")
-            pdf.cell(0, 4, f"{a.get('src_ip','-')} ({src_geo}) -> {a.get('dst_ip','-')} ({dst_geo}) port {a.get('dst_port','-')}", ln=True)
-            
-            pdf.ln(2)
-            if i >= 14: break
-
+    pdf.section("RECOMMENDATIONS")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*C_TEXT)
+    pdf.multi_cell(0, 6, p2)
+    
     return bytes(pdf.output())
 
 

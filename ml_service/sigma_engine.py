@@ -233,16 +233,7 @@ RULES = [
         "match": lambda log: _event(log, "privesc") or _cat(log, "privesc", "privilege_escalation"),
     },
 
-    # --- Atomic Red Team specific ---
-    {
-        "id": "ART-001",
-        "name": "Atomic Red Team Test Execution",
-        "mitre": "T1059",
-        "tactic": "Execution",
-        "severity": "medium",
-        "description": "Atomic Red Team test execution detected in logs",
-        "match": lambda log: _event(log, "atomic_execution_start", "atomic_execution_end"),
-    },
+
 
     # --- DoS ---
     {

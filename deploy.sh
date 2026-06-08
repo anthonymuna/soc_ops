@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SERVER="10.104.4.68"
-SSH_KEY="$(dirname "$0")/keys/syndicate4.pem"
+SSH_KEY="$(dirname "$0")/AI_lab.pem"
 REMOTE_DIR="/opt/syndicate4"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30"
 USER="ubuntu"

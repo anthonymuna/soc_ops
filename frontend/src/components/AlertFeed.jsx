@@ -240,10 +240,22 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
       data_exfil: 'T1041', c2_beacon: 'T1071', recon: 'T1018',
     }
     filtered = filtered.filter(a => {
-      const t = a.mitre_technique || evtMap[a.event_type]
-      // Support sub-techniques if the parent is selected (like T1110 -> T1110.001)
-      if (!t) return false
-      return t === selectedMitreId || t.startsWith(selectedMitreId + '.')
+      let ids = [];
+      if (Array.isArray(a.mitre_id)) ids.push(...a.mitre_id);
+      else if (typeof a.mitre_id === 'string') ids.push(a.mitre_id);
+      
+      if (ids.length === 0) {
+        const tech = a.mitre_technique;
+        if (Array.isArray(tech)) ids.push(...tech.filter(x => typeof x === 'string' && x.startsWith('T')));
+        else if (typeof tech === 'string' && tech.startsWith('T')) ids.push(tech);
+      }
+      
+      if (ids.length === 0 && evtMap[a.event_type]) {
+        ids.push(evtMap[a.event_type]);
+      }
+      
+      if (ids.length === 0) return false;
+      return ids.some(id => id === selectedMitreId || id.startsWith(selectedMitreId + '.'));
     })
   }
 
@@ -302,7 +314,22 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
 
           {filtered.map((a, i) => {
             const ts        = (a.ml_detected_at || a['@timestamp'] || '').slice(11, 19)
-            const mitreName = MITRE[a.mitre_technique] || a.mitre_technique || ''
+            let ids = [];
+            if (Array.isArray(a.mitre_id)) ids.push(...a.mitre_id);
+            else if (typeof a.mitre_id === 'string') ids.push(a.mitre_id);
+            
+            if (ids.length === 0) {
+              const tech = a.mitre_technique;
+              if (Array.isArray(tech)) ids.push(...tech.filter(x => typeof x === 'string' && x.startsWith('T')));
+              else if (typeof tech === 'string' && tech.startsWith('T')) ids.push(tech);
+            }
+            
+            let mitreName = '';
+            if (ids.length > 0) {
+              mitreName = ids.map(id => MITRE[id] || id).join(', ');
+            } else if (a.mitre_technique) {
+              mitreName = Array.isArray(a.mitre_technique) ? a.mitre_technique.join(', ') : a.mitre_technique;
+            }
             const rfClass   = a.ml_rf_class && a.ml_rf_class !== 'normal' ? a.ml_rf_class : null
             const isOpen    = expanded === i
             const alertId   = getAlertId(a)

@@ -105,7 +105,6 @@ EVENT_TYPE_MAP = {
     "ftp": 5, "ssh": 6, "rdp": 7, "smb": 8,
     "port_scan": 10, "brute_force": 11, "lateral_movement": 12,
     "data_exfil": 13, "c2_beacon": 14, "recon": 15, "privesc": 16,
-    "atomic_execution_start": 17, "atomic_execution_end": 18,
 }
 
 PROTOCOL_MAP = {"tcp": 0, "udp": 1, "icmp": 2, "other": 3}
@@ -566,7 +565,7 @@ class AnomalyDetector:
             is_if_anomaly = if_pred == -1 and if_score < -0.08
 
             # Layer 1: direct label from threat_category / event_type fields
-            # (simulator/atomic_runner already labels logs — use it as highest-confidence signal)
+            # (simulator already labels logs — use it as highest-confidence signal)
             label_class, label_conf = _infer_from_labels(log)
             is_label_attack = label_class != "normal" and label_conf >= 1.0
 
@@ -638,7 +637,6 @@ _EVENT_TO_CLASS = {
     "brute_force": "r2l", "lateral_movement": "r2l", "ftp_write": "r2l",
     "guess_passwd": "r2l", "ssh": "r2l",
     "data_exfil": "u2r", "c2_beacon": "u2r", "privesc": "u2r",
-    "atomic_execution_start": "u2r", "atomic_execution_end": "u2r",
     "dos": "dos", "ddos": "dos", "neptune": "dos", "smurf": "dos",
     "normal": "normal", "dns": "normal", "http": "normal",
     "https": "normal", "ntp": "normal", "smtp": "normal",

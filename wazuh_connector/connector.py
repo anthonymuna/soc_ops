@@ -152,7 +152,7 @@ def fetch_wazuh_alerts_from_ssh(minutes_back: int = 2) -> list[dict]:
 def build_manager_doc(entry: dict) -> dict:
     """Map a Wazuh manager REST log entry to an ES document."""
     level = entry.get("level", "info")
-    return {
+    ml_fields = {
         "@timestamp":        datetime.now(timezone.utc).isoformat(),
         "wazuh_timestamp":   entry.get("timestamp"),
         "wazuh_level":       level,
@@ -167,6 +167,7 @@ def build_manager_doc(entry: dict) -> dict:
         "dst_ip":            "10.104.4.68",
         "dst_port":          55000,
     }
+    return {**entry, **ml_fields}
 
 
 def build_alert_doc(alert: dict, agent_map: dict) -> dict:
@@ -200,40 +201,25 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
     mitre_tacs = mitre.get("tactic", [])
     mitre_tech = mitre.get("technique", [])
 
-    return {
+    ml_fields = {
         "@timestamp":        alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
         "wazuh_timestamp":   alert.get("timestamp"),
         "event_type":        "wazuh_alert",
         "source":            "wazuh_agent",
-        # Agent fields
         "agent_id":          agent_id,
         "agent_name":        agent.get("name", ""),
-        "agent_ip":          agent.get("ip", "any"),
-        "agent_os_name":     os_info.get("name", ""),
-        "agent_os_platform": os_info.get("platform", ""),
-        "agent_os_version":  os_info.get("version", ""),
-        "agent_version":     agent_info.get("version", agent.get("version", "")),
-        # Rule fields
-        "rule_id":           rule.get("id", ""),
-        "rule_level":        rule_level,
-        "rule_description":  rule.get("description", ""),
-        "rule_groups":       rule.get("groups", []),
-        "rule_pci_dss":      rule.get("pci_dss", []),
-        "rule_gdpr":         rule.get("gdpr", []),
-        # MITRE ATT&CK
-        "mitre_id":          mitre_ids,
-        "mitre_tactic":      mitre_tacs,
-        "mitre_technique":   mitre_tech,
-        # Network
         "src_ip":            src_ip,
         "dst_ip":            manager.get("name", "10.107.7.150"),
+        "src_port":          data.get("srcport", 0),
+        "dst_port":          data.get("destport") or data.get("dstport", 0),
+        "protocol":          data.get("protocol", "other"),
+        "bytes":             data.get("bytes") or data.get("srcbytes", 0),
         "wazuh_description": rule.get("description", ""),
         "wazuh_level":       str(rule_level),
-        # ML-compatible fields
         "threat_category":   threat_cat,
         "location":          alert.get("location", ""),
-        "full_log":          alert.get("full_log", ""),
     }
+    return {**alert, **ml_fields}
 
 
 def make_alert_id(alert: dict) -> str:
