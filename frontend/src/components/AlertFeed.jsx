@@ -382,7 +382,9 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
                       </span>
                     )}
                     {rfClass && (
-                      <span className="text-purple-400 text-[10px]">[{rfClass.toUpperCase()}]</span>
+                      <span className="text-purple-400 text-[10px]">
+                        [{rfClass === 'unknown_anomaly' ? 'ANOMALY' : rfClass.toUpperCase()}]
+                      </span>
                     )}
                     {mitreName && (
                       <span className="text-slate-600 hidden sm:inline">· {mitreName}</span>
@@ -395,7 +397,12 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
                 </div>
 
                 {/* IPs row */}
-                <div className="mt-1 text-slate-500 flex items-center gap-1 pl-5">
+                <div className="mt-1 text-slate-500 flex flex-wrap items-center gap-2 pl-5">
+                  {a.agent_name && (
+                    <span className="text-emerald-400/80 font-mono text-[9px] bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
+                      Host: {a.agent_name}
+                    </span>
+                  )}
                   {a.src_ip && (
                     <button
                       className="text-cyan-700 hover:text-cyan-400 transition-colors flex items-center gap-0.5"
