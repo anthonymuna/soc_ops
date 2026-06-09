@@ -658,18 +658,19 @@ def _infer_from_labels(log: dict) -> tuple[str, float]:
         et = et[0]
     et = str(et).lower().strip()
 
-    # threat_category from simulator is authoritative
+    # First, if event_type explicitly maps to an attack (e.g. syscheck, rootcheck, localfile), prioritize it
+    et_cls = _EVENT_TO_CLASS.get(et)
+    if et_cls and et_cls != "normal":
+        return et_cls, 0.95
+
+    # Then check threat_category
     cls = THREAT_CAT_MAP.get(cat) or _EVENT_TO_CLASS.get(cat)
     if cls and cls != "normal":
         return cls, 1.0
     if cls == "normal":
         return "normal", 1.0
 
-    # Fall back to event_type
-    cls = _EVENT_TO_CLASS.get(et)
-    if cls and cls != "normal":
-        return cls, 0.95
-    if cls == "normal":
+    if et_cls == "normal":
         return "normal", 0.95
 
     return "unknown", 0.0
