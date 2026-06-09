@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import threading
 
+import zlib
 import numpy as np
 import joblib
 from sklearn.ensemble import IsolationForest, RandomForestClassifier, GradientBoostingClassifier
@@ -98,6 +99,7 @@ FEATURE_NAMES = [
     "hour_of_day", "bytes", "dst_port", "src_port",
     "protocol_encoded", "event_type_encoded",
     "is_external_dst", "is_external_src", "connection_count_proxy",
+    "mitre_tactic_hash", "mitre_technique_hash",
 ]
 
 EVENT_TYPE_MAP = {
@@ -150,6 +152,11 @@ def _get_geo(ip: str) -> str:
 def _is_external(ip: str) -> int:
     s = str(ip)
     return 0 if any(s.startswith(p) for p in PRIVATE_PREFIXES) else 1
+
+
+def _hash_mitre(val: str) -> int:
+    if not val: return 0
+    return zlib.crc32(val.encode('utf-8')) % 1000
 
 
 def _download_file(url: str, dest: Path) -> bool:
@@ -237,6 +244,12 @@ def extract_features(logs: list[dict]) -> np.ndarray:
             hour = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).hour
         except Exception:
             hour = 0
+            
+        rule = log.get("rule", {})
+        mitre = rule.get("mitre", {})
+        tactic = mitre.get("tactic", [""])[0] if mitre.get("tactic") else ""
+        technique = mitre.get("technique", [""])[0] if mitre.get("technique") else ""
+        
         row = [
             hour,
             min(int(log.get("bytes", 0)), 10_000_000),
@@ -247,6 +260,8 @@ def extract_features(logs: list[dict]) -> np.ndarray:
             _is_external(str(log.get("dst_ip", "10.0.0.1"))),
             _is_external(str(log.get("src_ip", "10.0.0.1"))),
             int(log.get("connection_count", 1)),
+            _hash_mitre(tactic),
+            _hash_mitre(technique),
         ]
         rows.append(row)
     return np.array(rows, dtype=np.float32)
@@ -277,6 +292,16 @@ def log_to_text(log: dict) -> str:
     cc = int(log.get("connection_count", 0))
     if cc > 1:
         parts.append(f"{cc} connections")
+        
+    rule = log.get("rule", {})
+    mitre = rule.get("mitre", {})
+    tactics = mitre.get("tactic", [])
+    techniques = mitre.get("technique", [])
+    if tactics:
+        parts.append(f"MITRE Tactic: {', '.join(tactics)}")
+    if techniques:
+        parts.append(f"MITRE Technique: {', '.join(techniques)}")
+        
     cat = log.get("threat_category", "")
     if cat and cat != "normal":
         parts.append(f"classified as {str(cat).replace('_', ' ')}")
@@ -304,6 +329,12 @@ def _extract_labeled_logs(logs: list[dict]) -> tuple[np.ndarray, list[str]] | No
             hour = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).hour
         except Exception:
             hour = 0
+            
+        rule = log.get("rule", {})
+        mitre = rule.get("mitre", {})
+        tactic = mitre.get("tactic", [""])[0] if mitre.get("tactic") else ""
+        technique = mitre.get("technique", [""])[0] if mitre.get("technique") else ""
+        
         row = [
             hour,
             min(int(log.get("bytes", 0)), 10_000_000),
@@ -314,6 +345,8 @@ def _extract_labeled_logs(logs: list[dict]) -> tuple[np.ndarray, list[str]] | No
             _is_external(str(log.get("dst_ip", "10.0.0.1"))),
             _is_external(str(log.get("src_ip", "10.0.0.1"))),
             int(log.get("connection_count", 1)),
+            _hash_mitre(tactic),
+            _hash_mitre(technique),
         ]
         X_rows.append(row)
         y_rows.append(family)
