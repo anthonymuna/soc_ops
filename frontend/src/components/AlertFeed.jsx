@@ -327,7 +327,16 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
           )}
 
           {dedupedFiltered.map((a, i) => {
-            const ts        = (a.ml_detected_at || a['@timestamp'] || '').slice(11, 19)
+            const rawTs = a.ml_detected_at || a['@timestamp'] || ''
+            let ts = rawTs.slice(11, 19)
+            let dateStr = ''
+            if (rawTs) {
+              const d = new Date(rawTs)
+              if (!isNaN(d.getTime())) {
+                ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+              }
+            }
             let ids = [];
             if (Array.isArray(a.mitre_id)) ids.push(...a.mitre_id);
             else if (typeof a.mitre_id === 'string') ids.push(a.mitre_id);
@@ -379,7 +388,10 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
                       <span className="text-slate-600 hidden sm:inline">· {mitreName}</span>
                     )}
                   </div>
-                  <span className="text-slate-600 shrink-0 font-mono">{ts}</span>
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className="text-slate-500 font-mono text-xs">{ts}</span>
+                    {dateStr && <span className="text-slate-600 font-mono text-[9px]">{dateStr}</span>}
+                  </div>
                 </div>
 
                 {/* IPs row */}
