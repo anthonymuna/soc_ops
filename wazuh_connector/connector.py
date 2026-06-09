@@ -164,9 +164,6 @@ def build_manager_doc(entry: dict) -> dict:
         "agent_id":          "000",
         "agent_name":        "wazuh-manager",
         "threat_category":   "normal" if level == "info" else "anomalous",
-        "src_ip":            "10.107.7.150",
-        "dst_ip":            "10.104.4.68",
-        "dst_port":          55000,
     }
     return {**entry, **ml_fields}
 
@@ -191,7 +188,7 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
             pass
         return None
 
-    src_ip = get_valid_ip(data.get("srcip")) or get_valid_ip(agent.get("ip"))
+    src_ip = get_valid_ip(data.get("srcip"))
     dst_ip = get_valid_ip(data.get("destip")) or get_valid_ip(data.get("dstip"))
 
     # Enrich agent info from live agent list if available
