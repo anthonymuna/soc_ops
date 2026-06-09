@@ -111,6 +111,16 @@ def _write_alerts(alerts: list[dict]):
             logger.warning(f"Alert write error: {e}")
 
 
+def _write_logs(logs: list[dict]):
+    today = datetime.now(timezone.utc).strftime("%Y.%m.%d")
+    index_name = f"syndicate4-logs-{today}"
+    for log in logs:
+        try:
+            es.index(index=index_name, document=log)
+        except Exception as e:
+            logger.warning(f"Log write error: {e}")
+
+
 def run_train():
     # Fetch labels from both logs and user feedback
     logger.info("Training model on labeled logs + user feedback...")
@@ -320,8 +330,11 @@ def scan_live(req: ScanLiveRequest):
     stats["logs_scanned"] += len(req.logs)
     stats["last_scan"] = datetime.now(timezone.utc).isoformat()
     try:
+        # Write all incoming logs to the standard logs index for dashboarding and fine-tuning
+        _write_logs(req.logs)
+
         if not detector.is_trained():
-            logger.info("Model not trained yet — skipping scan_live")
+            logger.info("Model not trained yet — skipping scan_live anomaly check")
             return {"scanned": len(req.logs), "anomalies": 0, "status": "not_trained"}
             
         alerts = detector.predict(req.logs)
