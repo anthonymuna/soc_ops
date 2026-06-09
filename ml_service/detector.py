@@ -568,7 +568,7 @@ class AnomalyDetector:
             # Layer 1: direct label from threat_category / event_type fields
             # (simulator already labels logs — use it as highest-confidence signal)
             label_class, label_conf = _infer_from_labels(log)
-            is_label_attack = label_class != "normal" and label_conf >= 1.0
+            is_label_attack = label_class != "normal" and label_conf >= 0.9
 
             # Layer 2: live GradientBoosting (9-feature, trained on labeled ES logs)
             live_class, live_conf = "unknown", 0.0
@@ -641,7 +641,7 @@ _EVENT_TO_CLASS = {
     "dos": "dos", "ddos": "dos", "neptune": "dos", "smurf": "dos",
     "normal": "normal", "dns": "normal", "http": "normal",
     "https": "normal", "ntp": "normal", "smtp": "normal",
-    "syscheck": "u2r", "rootcheck": "u2r", "sca": "probe", "localfile": "normal",
+    "syscheck": "u2r", "rootcheck": "u2r", "sca": "probe", "localfile": "u2r",
 }
 
 

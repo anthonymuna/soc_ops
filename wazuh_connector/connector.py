@@ -358,7 +358,7 @@ def main():
                 resp = requests.post(
                     f"{ML_SERVICE_URL}/scan_live",
                     json={"logs": docs_to_scan},
-                    timeout=15
+                    timeout=60
                 )
                 resp.raise_for_status()
                 logger.info("Sent %d logs to ML service. Response: %s", len(docs_to_scan), resp.json())
