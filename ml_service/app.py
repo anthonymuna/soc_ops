@@ -63,6 +63,9 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class ScanLiveRequest(BaseModel):
+    logs: list[dict]
+
 
 class FeedbackRequest(BaseModel):
     label: str  # e.g., 'normal' or 'dos'
@@ -307,6 +310,33 @@ def trigger_train(background_tasks: BackgroundTasks, _token: str = Depends(_veri
 def trigger_scan(background_tasks: BackgroundTasks, _token: str = Depends(_verify_token)):
     background_tasks.add_task(run_scan)
     return {"message": "Scan triggered in background"}
+
+
+@app.post("/scan_live")
+def scan_live(req: ScanLiveRequest):
+    """Receive live stream of raw logs directly from connector, run prediction, and save alerts."""
+    if not req.logs:
+        return {"scanned": 0, "anomalies": 0}
+    stats["logs_scanned"] += len(req.logs)
+    stats["last_scan"] = datetime.now(timezone.utc).isoformat()
+    try:
+        if not detector.is_trained():
+            logger.info("Model not trained yet — skipping scan_live")
+            return {"scanned": len(req.logs), "anomalies": 0, "status": "not_trained"}
+            
+        alerts = detector.predict(req.logs)
+        if alerts:
+            stats["anomalies_detected"] += len(alerts)
+            _write_alerts(alerts)
+            logger.info(f"ML scan_live: {len(alerts)} anomalies from {len(req.logs)} logs")
+            for alert in alerts:
+                if alert.get("ml_severity") in ("critical", "high"):
+                    _send_notification(alert)
+        return {"scanned": len(req.logs), "anomalies": len(alerts)}
+    except Exception as e:
+        stats["scan_errors"] += 1
+        logger.error(f"Scan_live error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/model/status")

@@ -183,20 +183,9 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
         {/* Main grid */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           
-          {/* Left panel: MITRE Heatmap */}
-          <div className="lg:col-span-1 space-y-4">
+          {/* Left panel: MITRE Heatmap & System Status */}
+          <div className="lg:col-span-1 space-y-4 flex flex-col">
             <MitreHeatmap history={history} selectedMitreId={selectedMitreId} onSelectMitreId={setSelectedMitreId} />
-          </div>
-
-          {/* Alert feed — takes 2 cols (Middle) */}
-          <div className="lg:col-span-2 h-96">
-            <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />
-          </div>
-
-          {/* Right panel */}
-          <div className="lg:col-span-1 space-y-4">
-            <AlertMap history={history} />
-            <ModelStatus health={health} />
 
             {/* Scan errors / quick stats */}
             <div className="bg-soc-panel border border-soc-border rounded-lg p-4 space-y-2">
@@ -216,6 +205,17 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
               </div>
             </div>
           </div>
+
+          {/* Alert feed — takes 2 cols (Middle) */}
+          <div className="lg:col-span-2 flex flex-col min-h-[24rem]">
+            <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />
+          </div>
+
+          {/* Right panel */}
+          <div className="lg:col-span-1 space-y-4">
+            <AlertMap history={history} />
+            <ModelStatus health={health} />
+          </div>
         </div>
 
         {/* RF class breakdown */}
@@ -233,7 +233,8 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
 function AttackClassBreakdown({ history }) {
   const counts = {}
   for (const a of history) {
-    const cls = a.ml_rf_class || 'unclassified'
+    let cls = a.ml_rf_class || 'unclassified'
+    if (cls === 'unknown_anomaly') cls = 'unclassified'
     counts[cls] = (counts[cls] || 0) + 1
   }
   const total = Object.values(counts).reduce((s, v) => s + v, 0)
@@ -252,7 +253,7 @@ function AttackClassBreakdown({ history }) {
       <div className="space-y-2">
         {sorted.map(([cls, count]) => (
           <div key={cls} className="flex items-center gap-3">
-            <span className="text-xs text-slate-400 w-20 capitalize">{cls}</span>
+            <span className="text-xs text-slate-400 w-24 truncate capitalize">{cls}</span>
             <div className="flex-1 bg-soc-border rounded-full h-1.5 overflow-hidden">
               <div
                 className={`h-full rounded-full ${clsColor[cls] || 'bg-slate-500'}`}

@@ -105,6 +105,7 @@ EVENT_TYPE_MAP = {
     "ftp": 5, "ssh": 6, "rdp": 7, "smb": 8,
     "port_scan": 10, "brute_force": 11, "lateral_movement": 12,
     "data_exfil": 13, "c2_beacon": 14, "recon": 15, "privesc": 16,
+    "syscheck": 17, "rootcheck": 18, "sca": 19, "localfile": 20,
 }
 
 PROTOCOL_MAP = {"tcp": 0, "udp": 1, "icmp": 2, "other": 3}
@@ -640,6 +641,7 @@ _EVENT_TO_CLASS = {
     "dos": "dos", "ddos": "dos", "neptune": "dos", "smurf": "dos",
     "normal": "normal", "dns": "normal", "http": "normal",
     "https": "normal", "ntp": "normal", "smtp": "normal",
+    "syscheck": "u2r", "rootcheck": "u2r", "sca": "probe", "localfile": "normal",
 }
 
 

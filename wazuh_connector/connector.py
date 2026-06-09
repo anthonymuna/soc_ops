@@ -36,6 +36,7 @@ WAZUH_ALERT_TAIL_LINES = int(os.getenv("WAZUH_ALERT_TAIL_LINES", "2000"))
 POLL_INTERVAL        = int(os.getenv("POLL_INTERVAL", "30"))
 MANAGER_LOG_LIMIT    = int(os.getenv("MANAGER_LOG_LIMIT", "100"))
 ALERT_FETCH_MINUTES  = int(os.getenv("ALERT_FETCH_MINUTES", "2"))  # look back window
+ML_SERVICE_URL       = os.getenv("ML_SERVICE_URL", "http://ml_service:8000")
 
 HEADERS = {"Authorization": f"Bearer {WAZUH_JWT_TOKEN}"}
 
@@ -179,9 +180,19 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
     rule      = alert.get("rule", {})
     data      = alert.get("data", {})
     manager   = alert.get("manager", {})
-    src_ip    = (data.get("srcip")
-                 or alert.get("location", "")
-                 or agent.get("ip", "any"))
+    
+    import ipaddress
+    def get_valid_ip(val):
+        try:
+            if val:
+                ipaddress.ip_address(val)
+                return val
+        except ValueError:
+            pass
+        return None
+
+    src_ip = get_valid_ip(data.get("srcip")) or get_valid_ip(agent.get("ip"))
+    dst_ip = get_valid_ip(data.get("destip")) or get_valid_ip(data.get("dstip"))
 
     # Enrich agent info from live agent list if available
     agent_id   = agent.get("id", "")
@@ -201,15 +212,22 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
     mitre_tacs = mitre.get("tactic", [])
     mitre_tech = mitre.get("technique", [])
 
+    groups = rule.get("groups", [])
+    event_type = "wazuh_alert"
+    for g in groups:
+        if g in ("syscheck", "rootcheck", "sca", "localfile"):
+            event_type = g
+            break
+    if event_type == "wazuh_alert" and groups:
+        event_type = groups[0]
+
     ml_fields = {
         "@timestamp":        alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
         "wazuh_timestamp":   alert.get("timestamp"),
-        "event_type":        "wazuh_alert",
+        "event_type":        event_type,
         "source":            "wazuh_agent",
         "agent_id":          agent_id,
         "agent_name":        agent.get("name", ""),
-        "src_ip":            src_ip,
-        "dst_ip":            manager.get("name", "10.107.7.150"),
         "src_port":          data.get("srcport", 0),
         "dst_port":          data.get("destport") or data.get("dstport", 0),
         "protocol":          data.get("protocol", "other"),
@@ -219,6 +237,12 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
         "threat_category":   threat_cat,
         "location":          alert.get("location", ""),
     }
+    
+    if src_ip:
+        ml_fields["src_ip"] = src_ip
+    if dst_ip:
+        ml_fields["dst_ip"] = dst_ip
+
     return {**alert, **ml_fields}
 
 
@@ -278,17 +302,19 @@ def main():
         cycle += 1
         total_new = 0
 
+        docs_to_scan = []
+
         # ── 1. Manager logs via REST API ─────────────────────────────────────
         for entry in get_manager_logs(limit=MANAGER_LOG_LIMIT):
             lid = make_log_id(entry)
             if lid not in seen_log_ids:
                 try:
-                    es.index(index="syndicate4-logs-wazuh",
-                             document=build_manager_doc(entry))
+                    doc = build_manager_doc(entry)
+                    docs_to_scan.append(doc)
                     seen_log_ids.add(lid)
                     total_new += 1
                 except Exception as exc:
-                    logger.error("ES index (manager log) failed: %s", exc)
+                    logger.error("Manager doc build failed: %s", exc)
 
         # ── 2. Agent alerts via Wazuh OpenSearch Indexer ─────────────────────
         # Build agent map for enrichment
@@ -313,18 +339,31 @@ def main():
             if aid not in seen_alert_ids:
                 try:
                     doc = build_alert_doc(alert, agent_map)
-                    es.index(index="syndicate4-logs-wazuh", document=doc)
+                    docs_to_scan.append(doc)
                     seen_alert_ids.add(aid)
                     total_new += 1
                     aname = doc.get("agent_name", "?")
                     agent_alert_counts[aname] = agent_alert_counts.get(aname, 0) + 1
                 except Exception as exc:
-                    logger.error("ES index (alert) failed: %s", exc)
+                    logger.error("Alert doc build failed: %s", exc)
 
         if agent_alert_counts:
             for aname, count in sorted(agent_alert_counts.items(),
                                        key=lambda x: -x[1])[:5]:
                 logger.info("  Agent %-20s → %d alert(s)", aname, count)
+
+        # ── 3. Send logs to ML Service ───────────────────────────────────────
+        if docs_to_scan:
+            try:
+                resp = requests.post(
+                    f"{ML_SERVICE_URL}/scan_live",
+                    json={"logs": docs_to_scan},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                logger.info("Sent %d logs to ML service. Response: %s", len(docs_to_scan), resp.json())
+            except Exception as exc:
+                logger.error("Failed to send logs to ML service: %s", exc)
 
         logger.info(
             "Cycle %d | manager_logs+alerts → %d new docs | active_agents=%d",
