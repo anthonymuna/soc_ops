@@ -26,9 +26,23 @@ export async function login(username, password) {
     const err = await r.json().catch(() => ({}))
     throw new Error(err.detail || 'Login failed')
   }
-  const { token } = await r.json()
+  const data = await r.json()
+  const token = data.access || data.token
   setToken(token)
   return token
+}
+
+export async function updateUserCards(cards) {
+  const token = getToken()
+  if (!token) return
+  await fetch('/api/auth/me/', {
+    method: 'PATCH',
+    headers: { 
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}` 
+    },
+    body: JSON.stringify({ visible_cards: cards })
+  })
 }
 
 export async function logout() {

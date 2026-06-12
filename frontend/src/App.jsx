@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Shield, AlertTriangle, Database, Cpu, RefreshCw, Wifi, WifiOff, LogOut, Sun, Moon, FlaskConical, LayoutDashboard } from 'lucide-react'
+import { Shield, AlertTriangle, Database, Cpu, RefreshCw, Wifi, WifiOff, LogOut, Sun, Moon, FlaskConical, LayoutDashboard, Settings, X } from 'lucide-react'
 import { useSOC } from './hooks/useSOC'
-import { isLoggedIn, logout } from './auth'
+import { isLoggedIn, logout, getToken, updateUserCards } from './auth'
 import LoginPage from './components/LoginPage'
 import StatCard from './components/StatCard'
 import AlertFeed from './components/AlertFeed'
@@ -11,6 +11,21 @@ import ModelStatus from './components/ModelStatus'
 import ModelTestPage from './components/ModelTestPage'
 import ReportGenerator from './components/ReportGenerator'
 import AlertMap from './components/AlertMap'
+
+const ALL_CARDS = [
+  { id: 'stat_logs', label: 'Logs Scanned (Stat)' },
+  { id: 'stat_alerts', label: 'ML Alerts (Stat)' },
+  { id: 'stat_critical', label: 'Critical Alerts (Stat)' },
+  { id: 'stat_high', label: 'High Alerts (Stat)' },
+  { id: 'stat_session', label: 'Session Alerts (Stat)' },
+  { id: 'stat_model', label: 'Model Status (Stat)' },
+  { id: 'timeline', label: 'Timeline Chart' },
+  { id: 'heatmap', label: 'MITRE Heatmap' },
+  { id: 'alert_feed', label: 'Alert Feed' },
+  { id: 'alert_map', label: 'Geo Map' },
+  { id: 'model_status', label: 'Detailed Model Status' },
+  { id: 'class_breakdown', label: 'Attack Class Breakdown' }
+]
 
 export default function App() {
   const [authed, setAuthed] = useState(isLoggedIn)
@@ -38,6 +53,43 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
   const [tab, setTab] = useState('dashboard')
   const [selectedMitreId, setSelectedMitreId] = useState(null)
   const { health, stats, alerts, history, error, lastTick, refresh } = useSOC(10000, onUnauth)
+  
+  const [user, setUser] = useState(null)
+  const [showSettings, setShowSettings] = useState(false)
+  const [visibleCards, setVisibleCards] = useState([])
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const token = getToken()
+      if (!token) return
+      try {
+        const r = await fetch('/api/auth/me/', { headers: { Authorization: `Bearer ${token}` } })
+        if (r.ok) {
+          const d = await r.json()
+          setUser(d)
+          setVisibleCards(d.visible_cards || [])
+        }
+      } catch(e) {}
+    }
+    fetchUser()
+  }, [])
+
+  const toggleCard = (cardId) => {
+    setVisibleCards(prev => {
+      let next = []
+      if (prev.length === 0) {
+        next = ALL_CARDS.map(c => c.id).filter(id => id !== cardId)
+      } else if (prev.includes(cardId)) {
+        next = prev.filter(id => id !== cardId)
+      } else {
+        next = [...prev, cardId]
+      }
+      updateUserCards(next)
+      return next
+    })
+  }
+
+  const isVisible = (id) => visibleCards.length === 0 || visibleCards.includes(id)
 
   const isOnline = !error && health !== null
   const anomalyRate = stats
@@ -48,7 +100,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
   const highCount = alerts.filter(a => a.ml_severity === 'high').length
 
   return (
-    <div className="min-h-screen grid-bg">
+    <div className="min-h-screen grid-bg relative">
       {/* Header */}
       <header className="border-b border-soc-border bg-soc-panel/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -91,6 +143,13 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
                 {isOnline ? 'LIVE' : 'OFFLINE'}
               </span>
             </div>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="text-slate-500 hover:text-cyan-400 transition-colors"
+              title="Dashboard Settings"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
             <button
               onClick={onToggleTheme}
               className="text-slate-500 hover:text-cyan-400 transition-colors"
@@ -135,57 +194,69 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
 
         {/* Stat row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-          <StatCard
-            label="Logs Scanned"
-            value={(stats?.logs_scanned ?? 0).toLocaleString()}
-            color="soc-accent"
-            icon={<Database className="w-4 h-4" />}
-          />
-          <StatCard
-            label="ML Alerts (60m)"
-            value={alerts.length}
-            sub={`${anomalyRate ?? 0}% anomaly rate`}
-            color="soc-red"
-            icon={<AlertTriangle className="w-4 h-4" />}
-          />
-          <StatCard
-            label="Critical"
-            value={criticalCount}
-            color="soc-red"
-          />
-          <StatCard
-            label="High"
-            value={highCount}
-            color="soc-yellow"
-          />
-          <StatCard
-            label="Session Alerts"
-            value={history.length}
-            color="soc-purple"
-          />
-          <StatCard
-            label="Model"
-            value={health?.model_trained ? 'ACTIVE' : 'TRAINING'}
-            sub={
-              health?.zs_classifier_ready ? 'RF + GB + ZeroShot + IF' :
-                health?.live_supervised ? 'RF + GB + IF' :
-                  health?.nsl_kdd_trained ? 'RF + IF' :
-                    'IsolationForest'
-            }
-            color={health?.model_trained ? 'soc-green' : 'soc-yellow'}
-            icon={<Cpu className="w-4 h-4" />}
-          />
+          {isVisible('stat_logs') && (
+            <StatCard
+              label="Logs Scanned"
+              value={(stats?.logs_scanned ?? 0).toLocaleString()}
+              color="soc-accent"
+              icon={<Database className="w-4 h-4" />}
+            />
+          )}
+          {isVisible('stat_alerts') && (
+            <StatCard
+              label="ML Alerts (60m)"
+              value={alerts.length}
+              sub={`${anomalyRate ?? 0}% anomaly rate`}
+              color="soc-red"
+              icon={<AlertTriangle className="w-4 h-4" />}
+            />
+          )}
+          {isVisible('stat_critical') && (
+            <StatCard
+              label="Critical"
+              value={criticalCount}
+              color="soc-red"
+            />
+          )}
+          {isVisible('stat_high') && (
+            <StatCard
+              label="High"
+              value={highCount}
+              color="soc-yellow"
+            />
+          )}
+          {isVisible('stat_session') && (
+            <StatCard
+              label="Session Alerts"
+              value={history.length}
+              color="soc-purple"
+            />
+          )}
+          {isVisible('stat_model') && (
+            <StatCard
+              label="Model"
+              value={health?.model_trained ? 'ACTIVE' : 'TRAINING'}
+              sub={
+                health?.zs_classifier_ready ? 'RF + GB + ZeroShot + IF' :
+                  health?.live_supervised ? 'RF + GB + IF' :
+                    health?.nsl_kdd_trained ? 'RF + IF' :
+                      'IsolationForest'
+              }
+              color={health?.model_trained ? 'soc-green' : 'soc-yellow'}
+              icon={<Cpu className="w-4 h-4" />}
+            />
+          )}
         </div>
 
         {/* Timeline */}
-        <TimelineChart history={history} dark={dark} />
+        {isVisible('timeline') && <TimelineChart history={history} dark={dark} />}
 
         {/* Main grid */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           
           {/* Left panel: MITRE Heatmap & System Status */}
           <div className="lg:col-span-1 space-y-4 flex flex-col">
-            <MitreHeatmap history={history} selectedMitreId={selectedMitreId} onSelectMitreId={setSelectedMitreId} />
+            {isVisible('heatmap') && <MitreHeatmap history={history} selectedMitreId={selectedMitreId} onSelectMitreId={setSelectedMitreId} />}
 
             {/* Scan errors / quick stats */}
             <div className="bg-soc-panel border border-soc-border rounded-lg p-4 space-y-2">
@@ -208,24 +279,61 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
 
           {/* Alert feed — takes 2 cols (Middle) */}
           <div className="lg:col-span-2 flex flex-col min-h-[24rem]">
-            <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />
+            {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />}
           </div>
 
           {/* Right panel */}
           <div className="lg:col-span-1 space-y-4">
-            <AlertMap history={history} />
-            <ModelStatus health={health} />
+            {isVisible('alert_map') && <AlertMap history={history} />}
+            {isVisible('model_status') && <ModelStatus health={health} />}
           </div>
         </div>
 
         {/* RF class breakdown */}
-        {history.length > 0 && <AttackClassBreakdown history={history} />}
+        {isVisible('class_breakdown') && history.length > 0 && <AttackClassBreakdown history={history} />}
 
       </main>
 
       <footer className="border-t border-soc-border mt-8 py-3 text-center text-[10px] text-slate-700">
         NGAO SOC · AI-Based Cyber Threat Detection · Defensive SOC System
       </footer>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-soc-bg border border-soc-border rounded-lg shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-soc-border bg-soc-panel">
+              <h3 className="text-sm font-bold text-cyan-400 tracking-wider">DASHBOARD SETTINGS</h3>
+              <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-xs text-slate-400 mb-4">
+                Select which cards you want to display on your dashboard. Your preferences are saved automatically.
+              </p>
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                {ALL_CARDS.map(card => (
+                  <label key={card.id} className="flex items-center gap-3 p-2 rounded bg-soc-panel/50 hover:bg-soc-panel border border-transparent hover:border-soc-border cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      className="rounded bg-black border-soc-border text-cyan-500 focus:ring-cyan-500/30 w-4 h-4"
+                      checked={isVisible(card.id)}
+                      onChange={() => toggleCard(card.id)}
+                    />
+                    <span className="text-sm text-slate-300">{card.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-soc-border bg-soc-panel flex justify-end">
+              <button onClick={() => setShowSettings(false)} className="px-4 py-1.5 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 rounded text-xs font-bold tracking-wider transition-colors">
+                DONE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
