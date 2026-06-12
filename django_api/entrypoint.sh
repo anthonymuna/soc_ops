@@ -10,6 +10,8 @@ echo "Waiting for ml_service..."
 while ! curl -sf http://ml_service:8000/health > /dev/null 2>&1; do
   sleep 2
 done
+echo "Collecting static files..."
+python manage.py collectstatic --noinput
 
 echo "Running migrations..."
 python manage.py makemigrations auth_app alerts reports config
