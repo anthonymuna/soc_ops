@@ -457,7 +457,7 @@ class AnomalyDetector:
             rf = Pipeline([
                 ("scaler", StandardScaler()),
                 ("rf", RandomForestClassifier(n_estimators=300, max_depth=12,
-                                               n_jobs=-1, random_state=42)),
+                                               n_jobs=2, random_state=42)),
             ])
             X_tr, X_te, y_tr, y_te = train_test_split(X_kdd, y_kdd, test_size=0.1, random_state=42)
             rf.fit(X_tr, y_tr)
@@ -504,7 +504,7 @@ class AnomalyDetector:
             iforest = Pipeline([
                 ("scaler", StandardScaler()),
                 ("iforest", IsolationForest(n_estimators=200, contamination=CONTAMINATION,
-                                             max_samples="auto", random_state=42, n_jobs=-1)),
+                                             max_samples="auto", random_state=42, n_jobs=2)),
             ])
             iforest.fit(X_all)
             self.if_pipeline = iforest
@@ -514,7 +514,7 @@ class AnomalyDetector:
             iforest = Pipeline([
                 ("scaler", StandardScaler()),
                 ("iforest", IsolationForest(n_estimators=100, contamination=CONTAMINATION,
-                                             random_state=42, n_jobs=-1)),
+                                             random_state=42, n_jobs=2)),
             ])
             iforest.fit(X_synth)
             self.if_pipeline = iforest

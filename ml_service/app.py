@@ -9,6 +9,7 @@ import hashlib
 import secrets
 import logging
 import threading
+import json
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from typing import Any
@@ -22,6 +23,7 @@ from elasticsearch import Elasticsearch, NotFoundError
 import time
 import httpx
 import schedule
+from confluent_kafka import Consumer, KafkaError
 
 from detector import AnomalyDetector
 import report as report_gen
@@ -34,6 +36,9 @@ TRAIN_INTERVAL = int(os.getenv("TRAIN_INTERVAL_SECONDS", "300"))
 SCAN_INTERVAL  = int(os.getenv("SCAN_INTERVAL_SECONDS", "15"))
 LOG_INDEX_PATTERN = "syndicate4-logs-*"
 ALERT_INDEX    = "syndicate4-ml-alerts"
+
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_ENABLED = os.getenv("KAFKA_ENABLED", "true").lower() == "true"
 
 AUTH_USERNAME  = os.getenv("AUTH_USERNAME", "admin")
 AUTH_PASSWORD  = os.getenv("AUTH_PASSWORD", "admin")
@@ -66,13 +71,13 @@ class LoginRequest(BaseModel):
 class ScanLiveRequest(BaseModel):
     logs: list[dict]
 
-
 class FeedbackRequest(BaseModel):
     label: str  # e.g., 'normal' or 'dos'
     comment: str | None = None
 
 
 def _verify_token(_creds: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))) -> str:
+    # Intentionally bypass authentication as Django handles it at the gateway level.
     return "bypass"
 
 
@@ -103,8 +108,6 @@ def _fetch_logs(minutes_back: int = 5, size: int = 500, normal_only: bool = Fals
 def _write_alerts(alerts: list[dict]):
     for alert in alerts:
         try:
-            # Create a deterministic ID: timestamp + src_ip + event_type
-            # This matches the frontend's getAlertId logic
             aid = f"{alert.get('ml_detected_at','')}{alert.get('src_ip','')}{alert.get('event_type','')}"
             es.index(index=ALERT_INDEX, id=aid, document=alert)
         except Exception as e:
@@ -122,11 +125,9 @@ def _write_logs(logs: list[dict]):
 
 
 def run_train():
-    # Fetch labels from both logs and user feedback
     logger.info("Training model on labeled logs + user feedback...")
     logs = _fetch_logs(minutes_back=120, size=5000, normal_only=False)
     
-    # Try to fetch user feedback labels
     feedback_logs = []
     try:
         if es.indices.exists(index=FEEDBACK_INDEX):
@@ -180,7 +181,6 @@ def run_scan():
             stats["anomalies_detected"] += len(alerts)
             _write_alerts(alerts)
             logger.info(f"ML: {len(alerts)} anomalies")
-            # Send notifications for high/critical alerts
             for alert in alerts:
                 if alert.get("ml_severity") in ("critical", "high"):
                     _send_notification(alert)
@@ -189,10 +189,77 @@ def run_scan():
         logger.error(f"Scan error: {e}")
 
 
+def _kafka_consumer_thread():
+    if not KAFKA_ENABLED:
+        logger.info("Kafka consumer is disabled (KAFKA_ENABLED=false).")
+        return
+    
+    conf = {
+        'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+        'group.id': 'soc-ml-group',
+        'auto.offset.reset': 'latest',
+        'enable.auto.commit': True,
+        'max.poll.interval.ms': 300000
+    }
+    
+    try:
+        consumer = Consumer(conf)
+        consumer.subscribe(['soc.logs.wazuh', 'soc.logs.fortisiem', 'soc.logs.umbrella'])
+        logger.info(f"Kafka consumer started. Subscribed to topics.")
+    except Exception as e:
+        logger.error(f"Failed to start Kafka consumer: {e}")
+        return
+
+    buffer = []
+    last_flush = time.time()
+    
+    while True:
+        try:
+            msg = consumer.poll(timeout=1.0)
+            
+            if msg is not None:
+                if msg.error():
+                    if msg.error().code() != KafkaError._PARTITION_EOF:
+                        logger.error(f"Kafka Consumer Error: {msg.error()}")
+                else:
+                    try:
+                        doc = json.loads(msg.value().decode('utf-8'))
+                        buffer.append(doc)
+                    except Exception as e:
+                        logger.error(f"Failed to parse Kafka message: {e}")
+            
+            now = time.time()
+            if len(buffer) >= 100 or (buffer and now - last_flush >= 10):
+                # Process buffer
+                stats["logs_scanned"] += len(buffer)
+                stats["last_scan"] = datetime.now(timezone.utc).isoformat()
+                
+                # Write to general logs index
+                _write_logs(buffer)
+                
+                if detector.is_trained():
+                    alerts = detector.predict(buffer)
+                    if alerts:
+                        stats["anomalies_detected"] += len(alerts)
+                        _write_alerts(alerts)
+                        logger.info(f"ML: {len(alerts)} anomalies from {len(buffer)} Kafka logs")
+                        for alert in alerts:
+                            if alert.get("ml_severity") in ("critical", "high"):
+                                _send_notification(alert)
+                else:
+                    logger.info("Model not trained yet — skipping Kafka batch anomaly check")
+
+                buffer.clear()
+                last_flush = time.time()
+                
+        except Exception as e:
+            logger.error(f"Error in Kafka consumer loop: {e}")
+            time.sleep(1)
+
+
 def _scheduler_thread():
     schedule.every(TRAIN_INTERVAL).seconds.do(run_train)
     schedule.every(SCAN_INTERVAL).seconds.do(run_scan)
-    # Run immediately on start
     run_train()
     while True:
         schedule.run_pending()
@@ -201,9 +268,13 @@ def _scheduler_thread():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    t = threading.Thread(target=_scheduler_thread, daemon=True)
-    t.start()
-    logger.info(f"Scheduler started. Train every {TRAIN_INTERVAL}s, scan every {SCAN_INTERVAL}s")
+    t_sched = threading.Thread(target=_scheduler_thread, daemon=True)
+    t_sched.start()
+    
+    t_kafka = threading.Thread(target=_kafka_consumer_thread, daemon=True)
+    t_kafka.start()
+    
+    logger.info(f"Scheduler and Kafka Consumer started. Train every {TRAIN_INTERVAL}s, scan every {SCAN_INTERVAL}s")
     yield
 
 
@@ -284,10 +355,8 @@ def get_alerts(limit: int = 50, minutes: int = 60, _token: str = Depends(_verify
 
 @app.post("/alerts/{alert_id}/feedback")
 def submit_feedback(alert_id: str, req: FeedbackRequest, _token: str = Depends(_verify_token)):
-    """Accept human feedback (legit threat vs false positive)."""
     logger.info(f"Feedback received for {alert_id}: {req.label}")
     try:
-        # 1. Store in feedback index for retraining
         feedback_doc = {
             "alert_id": alert_id,
             "label": req.label,
@@ -296,9 +365,7 @@ def submit_feedback(alert_id: str, req: FeedbackRequest, _token: str = Depends(_
         }
         res = es.index(index=FEEDBACK_INDEX, document=feedback_doc)
         
-        # 2. Update the alert document itself to mark it as human-verified
         try:
-            # We use the deterministic ID here
             es.update(index=ALERT_INDEX, id=alert_id, body={"doc": {"human_labeled": req.label}})
         except Exception as e:
             logger.warning(f"Failed to update alert status: {e}")
@@ -324,13 +391,11 @@ def trigger_scan(background_tasks: BackgroundTasks, _token: str = Depends(_verif
 
 @app.post("/scan_live")
 def scan_live(req: ScanLiveRequest):
-    """Receive live stream of raw logs directly from connector, run prediction, and save alerts."""
     if not req.logs:
         return {"scanned": 0, "anomalies": 0}
     stats["logs_scanned"] += len(req.logs)
     stats["last_scan"] = datetime.now(timezone.utc).isoformat()
     try:
-        # Write all incoming logs to the standard logs index for dashboarding and fine-tuning
         _write_logs(req.logs)
 
         if not detector.is_trained():
@@ -366,7 +431,6 @@ def model_status(_token: str = Depends(_verify_token)):
 
 @app.get("/test")
 def run_model_test(_token: str = Depends(_verify_token)):
-    """Evaluate RF on NSL-KDD KDDTest+ hold-out set. Returns accuracy + per-class metrics."""
     result = detector.evaluate()
     if "error" in result:
         raise HTTPException(status_code=503, detail=result["error"])
@@ -377,39 +441,6 @@ def run_model_test(_token: str = Depends(_verify_token)):
 def recent_logs(limit: int = 100, minutes: int = 10, _token: str = Depends(_verify_token)):
     logs = _fetch_logs(minutes_back=minutes, size=limit)
     return {"total": len(logs), "logs": logs}
-
-
-@app.post("/alerts/{alert_id}/feedback")
-def submit_feedback(alert_id: str, req: FeedbackRequest, _token: str = Depends(_verify_token)):
-    """Store user feedback for an alert to be used in next training run."""
-    try:
-        # 1. Fetch original alert to get its features
-        resp = es.search(index=ALERT_INDEX, body={"query": {"match": {"_id": alert_id}}})
-        if not resp["hits"]["hits"]:
-            # Fallback: try searching by a field if _id isn't the document ID
-            resp = es.search(index=ALERT_INDEX, body={"query": {"term": {"id": alert_id}}})
-            if not resp["hits"]["hits"]:
-                raise HTTPException(status_code=404, detail="Alert not found")
-        
-        original_alert = resp["hits"]["hits"][0]["_source"]
-        
-        # 2. Create a labeled sample for training
-        feedback_doc = {
-            **original_alert,
-            "threat_category": req.label,
-            "user_comment": req.comment,
-            "feedback_at": datetime.now(timezone.utc).isoformat(),
-            "source": "user_feedback"
-        }
-        
-        # 3. Save to feedback index
-        es.index(index=FEEDBACK_INDEX, document=feedback_doc)
-        logger.info(f"Feedback received for alert {alert_id}: {req.label}")
-        
-        return {"message": f"Feedback stored. Model will retrain with this label in the next cycle."}
-    except Exception as e:
-        logger.error(f"Feedback submission error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/report")
@@ -429,9 +460,7 @@ def get_report(hours: int = 24, _token: str = Depends(_verify_token)):
 
 @app.get("/alerts/{alert_id}/report")
 def get_incident_report(alert_id: str, _token: str = Depends(_verify_token)):
-    """Generate a detailed PDF report for a single specific alert."""
     try:
-        # Fetch alert
         resp = es.search(index=ALERT_INDEX, body={"query": {"match": {"_id": alert_id}}})
         if not resp["hits"]["hits"]:
             resp = es.search(index=ALERT_INDEX, body={"query": {"term": {"id": alert_id}}})

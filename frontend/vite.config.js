@@ -6,8 +6,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://ml_service:8000',
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        target: 'http://django_api:8080',
+        changeOrigin: true,
       },
     },
   },

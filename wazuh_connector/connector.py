@@ -5,8 +5,8 @@ import logging
 import requests
 import urllib3
 import subprocess
-from elasticsearch import Elasticsearch
 from datetime import datetime, timezone, timedelta
+from confluent_kafka import Producer
 
 # Disable insecure request warnings for self-signed certs
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -20,9 +20,6 @@ logger = logging.getLogger("wazuh-connector")
 # ── Environment variables ─────────────────────────────────────────────────────
 WAZUH_API_URL        = os.getenv("WAZUH_API_URL",   "https://127.0.0.1:55000")
 WAZUH_JWT_TOKEN      = os.getenv("WAZUH_JWT_TOKEN", "")
-# Local Elasticsearch (our Docker ES where ML + Kibana read from)
-ES_HOST              = os.getenv("ES_HOST",          "http://elasticsearch:9200")
-# Wazuh's own OpenSearch indexer (tunnelled via SSH → localhost:9201)
 WAZUH_INDEXER_HOST   = os.getenv("WAZUH_INDEXER_HOST", "https://127.0.0.1:9201")
 WAZUH_INDEXER_USER   = os.getenv("WAZUH_INDEXER_USER", "admin")
 WAZUH_INDEXER_PASS   = os.getenv("WAZUH_INDEXER_PASS", "")
@@ -35,8 +32,8 @@ WAZUH_ALERTS_FILE    = os.getenv("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/al
 WAZUH_ALERT_TAIL_LINES = int(os.getenv("WAZUH_ALERT_TAIL_LINES", "2000"))
 POLL_INTERVAL        = int(os.getenv("POLL_INTERVAL", "30"))
 MANAGER_LOG_LIMIT    = int(os.getenv("MANAGER_LOG_LIMIT", "100"))
-ALERT_FETCH_MINUTES  = int(os.getenv("ALERT_FETCH_MINUTES", "2"))  # look back window
-ML_SERVICE_URL       = os.getenv("ML_SERVICE_URL", "http://ml_service:8000")
+ALERT_FETCH_MINUTES  = int(os.getenv("ALERT_FETCH_MINUTES", "2"))
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
 HEADERS = {"Authorization": f"Bearer {WAZUH_JWT_TOKEN}"}
 
@@ -74,10 +71,6 @@ def get_active_agents():
 
 def fetch_wazuh_alerts(indexer_url: str, user: str, pwd: str,
                        minutes_back: int = 2, size: int = 500):
-    """
-    Pull recent alerts directly from Wazuh's own OpenSearch indexer.
-    These are the per-agent, rule-triggered alerts — the richest data available.
-    """
     if not pwd:
         logger.warning("Skipping Wazuh indexer fetch: WAZUH_INDEXER_PASS is not configured.")
         return []
@@ -120,7 +113,6 @@ def _parse_wazuh_ts(value: str) -> datetime | None:
 
 
 def fetch_wazuh_alerts_from_ssh(minutes_back: int = 2) -> list[dict]:
-    """Pull recent Wazuh alert JSON lines from the manager over SSH."""
     since = datetime.now(timezone.utc) - timedelta(minutes=minutes_back)
     remote = f"{WAZUH_SSH_USER}@{WAZUH_SSH_HOST}"
     cmd = [
@@ -151,32 +143,39 @@ def fetch_wazuh_alerts_from_ssh(minutes_back: int = 2) -> list[dict]:
 
 
 def build_manager_doc(entry: dict) -> dict:
-    """Map a Wazuh manager REST log entry to an ES document."""
     level = entry.get("level", "info")
-    ml_fields = {
+    
+    return {
         "@timestamp":        datetime.now(timezone.utc).isoformat(),
-        "wazuh_timestamp":   entry.get("timestamp"),
-        "wazuh_level":       level,
-        "wazuh_description": entry.get("description", ""),
-        "wazuh_tag":         entry.get("tag", ""),
-        "event_type":        "wazuh_manager_log",
+        "ingested_at":       datetime.now(timezone.utc).isoformat(),
         "source":            "wazuh_manager",
+        "connector":         "wazuh",
         "agent_id":          "000",
         "agent_name":        "wazuh-manager",
+        "event_type":        "wazuh_manager_log",
+        "src_ip":            None,
+        "dst_ip":            None,
+        "src_port":          0,
+        "dst_port":          0,
+        "protocol":          "other",
+        "bytes":             0,
         "threat_category":   "normal" if level == "info" else "anomalous",
+        "wazuh_level":       level,
+        "wazuh_description": entry.get("description", ""),
+        "rule_id":           None,
+        "rule_name":         None,
+        "severity":          level,
+        "mitre_ids":         [],
+        "mitre_tactics":     [],
+        "mitre_techniques":  [],
+        "raw":               entry
     }
-    return {**entry, **ml_fields}
 
 
 def build_alert_doc(alert: dict, agent_map: dict) -> dict:
-    """
-    Map a Wazuh alert (from OpenSearch) to our Elasticsearch schema.
-    Alert schema: https://documentation.wazuh.com/current/user-manual/manager/event-types.html
-    """
     agent     = alert.get("agent", {})
     rule      = alert.get("rule", {})
     data      = alert.get("data", {})
-    manager   = alert.get("manager", {})
     
     import ipaddress
     def get_valid_ip(val):
@@ -191,10 +190,8 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
     src_ip = get_valid_ip(data.get("srcip"))
     dst_ip = get_valid_ip(data.get("destip")) or get_valid_ip(data.get("dstip"))
 
-    # Enrich agent info from live agent list if available
     agent_id   = agent.get("id", "")
     agent_info = agent_map.get(agent_id, {})
-    os_info    = agent_info.get("os", {})
 
     rule_level = int(rule.get("level", 0))
     if rule_level >= 12:
@@ -218,38 +215,44 @@ def build_alert_doc(alert: dict, agent_map: dict) -> dict:
     if event_type == "wazuh_alert" and groups:
         event_type = groups[0]
 
-    ml_fields = {
+    return {
         "@timestamp":        alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "wazuh_timestamp":   alert.get("timestamp"),
-        "event_type":        event_type,
+        "ingested_at":       datetime.now(timezone.utc).isoformat(),
         "source":            "wazuh_agent",
+        "connector":         "wazuh",
         "agent_id":          agent_id,
         "agent_name":        agent.get("name", ""),
-        "src_port":          data.get("srcport", 0),
-        "dst_port":          data.get("destport") or data.get("dstport", 0),
-        "protocol":          data.get("protocol", "other"),
-        "bytes":             data.get("bytes") or data.get("srcbytes", 0),
-        "wazuh_description": rule.get("description", ""),
-        "wazuh_level":       str(rule_level),
+        "event_type":        event_type,
+        "src_ip":            src_ip,
+        "dst_ip":            dst_ip,
+        "src_port":          int(data.get("srcport", 0)),
+        "dst_port":          int(data.get("destport") or data.get("dstport", 0)),
+        "protocol":          str(data.get("protocol", "other")),
+        "bytes":             int(data.get("bytes") or data.get("srcbytes", 0)),
         "threat_category":   threat_cat,
-        "location":          alert.get("location", ""),
+        "wazuh_level":       str(rule_level),
+        "wazuh_description": str(rule.get("description", "")),
+        "rule_id":           str(rule.get("id", "")),
+        "rule_name":         str(rule.get("description", "")),
+        "severity":          str(rule_level),
+        "mitre_ids":         mitre_ids if isinstance(mitre_ids, list) else [mitre_ids],
+        "mitre_tactics":     mitre_tacs if isinstance(mitre_tacs, list) else [mitre_tacs],
+        "mitre_techniques":  mitre_tech if isinstance(mitre_tech, list) else [mitre_tech],
+        "raw":               alert
     }
-    
-    if src_ip:
-        ml_fields["src_ip"] = src_ip
-    if dst_ip:
-        ml_fields["dst_ip"] = dst_ip
-
-    return {**alert, **ml_fields}
 
 
 def make_alert_id(alert: dict) -> str:
-    """Stable dedup key for an alert."""
     return f"{alert.get('id','')}-{alert.get('timestamp','')}"
 
 
 def make_log_id(entry: dict) -> int:
     return hash(f"{entry.get('timestamp','')}-{entry.get('description','')}")
+
+
+def delivery_report(err, msg):
+    if err is not None:
+        logger.error(f"Message delivery failed: {err}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -258,25 +261,12 @@ def main():
     logger.info("Starting Wazuh Connector v2 (agent-alert mode)…")
     logger.info("Wazuh API     : %s", WAZUH_API_URL)
     logger.info("Wazuh Indexer : %s", WAZUH_INDEXER_HOST)
-    logger.info("ES Host       : %s", ES_HOST)
     logger.info(
         "Wazuh alerts  : %s via %s",
         "enabled" if WAZUH_ALERTS_ENABLED else "disabled",
         WAZUH_ALERT_SOURCE,
     )
 
-    # Wait for local Elasticsearch
-    es = Elasticsearch(ES_HOST, request_timeout=30)
-    while True:
-        try:
-            es.info()
-            break
-        except Exception as exc:
-            logger.info("Waiting for Elasticsearch… (%s)", exc)
-            time.sleep(5)
-    logger.info("Connected to Elasticsearch.")
-
-    # Verify Wazuh API auth with an endpoint supported by Wazuh 4.14.
     try:
         resp = requests.get(
             f"{WAZUH_API_URL}/agents",
@@ -291,6 +281,13 @@ def main():
     except Exception as exc:
         logger.warning("Wazuh API auth check failed (token may still work): %s", exc)
 
+    producer = Producer({
+        'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+        'acks': 1,
+        'linger.ms': 50,
+        'batch.num.messages': 500
+    })
+
     seen_log_ids:   set = set()
     seen_alert_ids: set = set()
     cycle = 0
@@ -299,22 +296,24 @@ def main():
         cycle += 1
         total_new = 0
 
-        docs_to_scan = []
-
         # ── 1. Manager logs via REST API ─────────────────────────────────────
         for entry in get_manager_logs(limit=MANAGER_LOG_LIMIT):
             lid = make_log_id(entry)
             if lid not in seen_log_ids:
                 try:
                     doc = build_manager_doc(entry)
-                    docs_to_scan.append(doc)
+                    producer.produce(
+                        'soc.logs.wazuh',
+                        key=doc['agent_id'].encode('utf-8') if doc['agent_id'] else b"",
+                        value=json.dumps(doc).encode('utf-8'),
+                        callback=delivery_report
+                    )
                     seen_log_ids.add(lid)
                     total_new += 1
                 except Exception as exc:
-                    logger.error("Manager doc build failed: %s", exc)
+                    logger.error("Manager doc build/produce failed: %s", exc)
 
         # ── 2. Agent alerts via Wazuh OpenSearch Indexer ─────────────────────
-        # Build agent map for enrichment
         agents     = get_active_agents()
         agent_map  = {a["id"]: a for a in agents}
 
@@ -327,8 +326,6 @@ def main():
                 )
             elif WAZUH_ALERT_SOURCE == "ssh_file":
                 alerts = fetch_wazuh_alerts_from_ssh(minutes_back=ALERT_FETCH_MINUTES)
-            else:
-                logger.warning("Unknown WAZUH_ALERT_SOURCE=%s", WAZUH_ALERT_SOURCE)
 
         agent_alert_counts: dict = {}
         for alert in alerts:
@@ -336,38 +333,31 @@ def main():
             if aid not in seen_alert_ids:
                 try:
                     doc = build_alert_doc(alert, agent_map)
-                    docs_to_scan.append(doc)
+                    producer.produce(
+                        'soc.logs.wazuh',
+                        key=doc['agent_id'].encode('utf-8') if doc['agent_id'] else b"",
+                        value=json.dumps(doc).encode('utf-8'),
+                        callback=delivery_report
+                    )
                     seen_alert_ids.add(aid)
                     total_new += 1
                     aname = doc.get("agent_name", "?")
                     agent_alert_counts[aname] = agent_alert_counts.get(aname, 0) + 1
                 except Exception as exc:
-                    logger.error("Alert doc build failed: %s", exc)
+                    logger.error("Alert doc build/produce failed: %s", exc)
+
+        producer.poll(0)
 
         if agent_alert_counts:
             for aname, count in sorted(agent_alert_counts.items(),
                                        key=lambda x: -x[1])[:5]:
                 logger.info("  Agent %-20s → %d alert(s)", aname, count)
 
-        # ── 3. Send logs to ML Service ───────────────────────────────────────
-        if docs_to_scan:
-            try:
-                resp = requests.post(
-                    f"{ML_SERVICE_URL}/scan_live",
-                    json={"logs": docs_to_scan},
-                    timeout=60
-                )
-                resp.raise_for_status()
-                logger.info("Sent %d logs to ML service. Response: %s", len(docs_to_scan), resp.json())
-            except Exception as exc:
-                logger.error("Failed to send logs to ML service: %s", exc)
-
         logger.info(
             "Cycle %d | manager_logs+alerts → %d new docs | active_agents=%d",
             cycle, total_new, len(agents)
         )
 
-        # Keep dedup sets bounded
         if len(seen_log_ids) > 10_000:
             seen_log_ids.clear()
         if len(seen_alert_ids) > 50_000:

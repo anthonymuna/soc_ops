@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # deploy.sh — run LOCALLY to push syndicate4 to server and start everything
 # Handles network interruptions: server_setup.sh runs in tmux via nohup
-# Usage: ./deploy.sh [--check | --logs | --attach | --status | --tunnel]
+# Usage: ./deploy.sh [--check | --logs | --attach | --status | --tunnel | --migrate]
 
 set -euo pipefail
 
@@ -39,6 +39,13 @@ case "${1:-deploy}" in
     echo ""
     ssh_cmd "curl -sf http://localhost:9200/_cluster/health?pretty 2>/dev/null || echo 'Elasticsearch: DOWN'"
     ssh_cmd "curl -sf http://localhost:8000/health 2>/dev/null || echo 'ML API: DOWN'"
+    ssh_cmd "docker exec syndicate4-kafka kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null || echo 'Kafka: DOWN'"
+    exit 0
+    ;;
+
+  --migrate)
+    echo "Running Django migrations on server..."
+    ssh_cmd "cd /opt/syndicate4 && docker compose exec django_api python manage.py migrate"
     exit 0
     ;;
 
@@ -55,7 +62,7 @@ case "${1:-deploy}" in
     ;;
 
   --tunnel)
-    echo "Starting SSH tunnel (Frontend:3000, Kibana:5601, ML API:8000, Responder:8001)..."
+    echo "Starting SSH tunnel (Frontend:3000, Kibana:5601, ML API:8000, Django API:8080, Responder:8001)..."
     echo "Open browser: http://localhost:3000"
     echo "Ctrl+C to stop"
     autossh -M 0 \
@@ -67,12 +74,14 @@ case "${1:-deploy}" in
       -L 3000:localhost:3000 \
       -L 5601:localhost:5601 \
       -L 8000:localhost:8000 \
+      -L 8080:localhost:8080 \
       -L 8001:localhost:8001 \
       "${USER}@${SERVER}" 2>/dev/null || \
     ssh $SSH_OPTS -N \
       -L 3000:localhost:3000 \
       -L 5601:localhost:5601 \
       -L 8000:localhost:8000 \
+      -L 8080:localhost:8080 \
       -L 8001:localhost:8001 \
       "${USER}@${SERVER}"
     exit 0
@@ -82,7 +91,7 @@ case "${1:-deploy}" in
     ;;
 
   *)
-    echo "Usage: $0 [--check | --status | --logs | --attach | --tunnel | deploy]"
+    echo "Usage: $0 [--check | --status | --logs | --attach | --tunnel | --migrate | deploy]"
     exit 1
     ;;
 esac
@@ -148,3 +157,4 @@ echo "  Direct access (no tunnel needed):"
 echo "  Dashboard: http://${SERVER}:3000"
 echo "  Kibana:    http://${SERVER}:5601"
 echo "  ML API:    http://${SERVER}:8000/docs"
+echo "  Django API:http://${SERVER}:8080/api/"
