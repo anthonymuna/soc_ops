@@ -190,7 +190,7 @@ services:
     build: ./django_api
     container_name: syndicate4-django
     ports:
-      - "8080:8080"
+      - "8088:8080"
     environment:
       - DATABASE_URL=postgres://syndicate4:${POSTGRES_PASSWORD}@postgres:5432/syndicate4
       - SECRET_KEY=${SECRET_KEY}
