@@ -10,8 +10,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 
 INSTALLED_APPS = [
-    'material',
-    'material.admin',
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -99,3 +98,17 @@ SIMPLE_JWT = {
 
 ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://ml_service:8000")
 ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
+
+JAZZMIN_SETTINGS = {
+    "site_title": "SOC Ops Admin",
+    "site_header": "SOC Ops",
+    "site_brand": "SOC Ops Platform",
+    "welcome_sign": "Welcome to the SOC Ops Admin",
+    "search_model": ["auth.User", "auth_app.SOCUser"],
+    "show_ui_builder": False,
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "materia",
+    "dark_mode_theme": "darkly",
+}
