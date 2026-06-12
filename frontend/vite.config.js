@@ -7,7 +7,6 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://django_api:8080',
-        changeOrigin: true,
       },
     },
   },
