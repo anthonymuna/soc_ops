@@ -10,7 +10,7 @@ export default function ReportGenerator({ stats, alerts, history, health }) {
     setLoading(true)
     try {
       const token = getToken()
-      const r = await fetch(`/api/report?hours=${hours}`, {
+      const r = await fetch(`/api/reports/?hours=${hours}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)

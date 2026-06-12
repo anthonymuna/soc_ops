@@ -16,10 +16,10 @@ import threading
 import zlib
 import numpy as np
 import joblib
-from sklearn.ensemble import IsolationForest, RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import IsolationForest, RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 MODEL_PATH        = Path("/app/models/detector.pkl")
 NSL_KDD_PATH      = Path("/app/models/nsl_kdd_train.csv")
@@ -454,20 +454,28 @@ class AnomalyDetector:
         if nsl is not None:
             X_kdd, y_kdd, classes = nsl
             logger.info(f"Training RF on {len(X_kdd)} NSL-KDD samples ({len(classes)} classes)...")
-            rf = Pipeline([
+            base_pipe = Pipeline([
                 ("scaler", StandardScaler()),
-                ("rf", RandomForestClassifier(n_estimators=300, max_depth=12,
-                                               n_jobs=2, random_state=42)),
+                ("rf", RandomForestClassifier(random_state=42, n_jobs=1)),
             ])
+            param_dist = {
+                "rf__n_estimators": [100, 200, 300],
+                "rf__max_depth": [10, 15, None],
+                "rf__min_samples_split": [2, 5, 10]
+            }
+            search = RandomizedSearchCV(base_pipe, param_dist, n_iter=5, cv=3, n_jobs=2, random_state=42)
             X_tr, X_te, y_tr, y_te = train_test_split(X_kdd, y_kdd, test_size=0.1, random_state=42)
-            rf.fit(X_tr, y_tr)
-            acc = rf.score(X_te, y_te)
-            self.rf_pipeline = rf
+            search.fit(X_tr, y_tr)
+            
+            acc = search.score(X_te, y_te)
+            self.rf_pipeline = search.best_estimator_
             self.rf_classes = classes
             self.nsl_kdd_trained = True
+            
             result["rf_accuracy"] = round(acc, 4)
+            result["rf_best_params"] = search.best_params_
             result["rf_classes"] = classes
-            logger.info(f"NSL-KDD RF accuracy: {acc:.4f}")
+            logger.info(f"NSL-KDD RF best params: {search.best_params_}, accuracy: {acc:.4f}")
 
         # 2. Live labeled logs → supervised classifier
         # KEY FIX: use ALL logs with their threat_category labels — not "normal only"
@@ -483,13 +491,26 @@ class AnomalyDetector:
                     y_enc = le.fit_transform(y_live)
                     live_clf = Pipeline([
                         ("scaler", StandardScaler()),
-                        ("gb", GradientBoostingClassifier(
-                            n_estimators=200, max_depth=5,
-                            learning_rate=0.1, random_state=42,
-                        )),
+                        ("gb", HistGradientBoostingClassifier(random_state=42)),
                     ])
-                    live_clf.fit(X_live, y_enc)
-                    self.live_pipeline = live_clf
+                    
+                    n_cv = min(3, len(X_live) // 5) if len(X_live) > 10 else 2
+                    if n_cv >= 2:
+                        param_dist = {
+                            "gb__learning_rate": [0.05, 0.1, 0.2],
+                            "gb__max_iter": [100, 200, 300],
+                            "gb__max_depth": [3, 5, 10, None]
+                        }
+                        search = RandomizedSearchCV(live_clf, param_dist, n_iter=5, cv=n_cv, n_jobs=2, random_state=42)
+                        search.fit(X_live, y_enc)
+                        self.live_pipeline = search.best_estimator_
+                        result["live_best_params"] = search.best_params_
+                        logger.info(f"Live classifier optimized: {search.best_params_}")
+                    else:
+                        live_clf.fit(X_live, y_enc)
+                        self.live_pipeline = live_clf
+                        logger.info("Not enough data for CV, used default HistGradientBoosting.")
+
                     self.live_classes = list(le.classes_)
                     self.live_supervised = True
                     result["live_samples"] = len(X_live)
@@ -501,14 +522,27 @@ class AnomalyDetector:
         # 3. IsolationForest fallback (trains on whatever we have)
         if live_logs:
             X_all = extract_features(live_logs)
+            
+            anomalies_count = 0
+            for log in live_logs:
+                cat = str(log.get("threat_category", "")).lower()
+                et = str(log.get("event_type", "")).lower()
+                family = THREAT_CAT_MAP.get(cat) or THREAT_CAT_MAP.get(et, "normal")
+                if family != "normal":
+                    anomalies_count += 1
+            
+            dynamic_contam = max(0.01, min(0.2, anomalies_count / max(1, len(live_logs))))
+            logger.info(f"Dynamic contamination calculated as {dynamic_contam:.3f} based on {anomalies_count} anomalies out of {len(live_logs)} logs")
+
             iforest = Pipeline([
                 ("scaler", StandardScaler()),
-                ("iforest", IsolationForest(n_estimators=200, contamination=CONTAMINATION,
+                ("iforest", IsolationForest(n_estimators=200, contamination=dynamic_contam,
                                              max_samples="auto", random_state=42, n_jobs=2)),
             ])
             iforest.fit(X_all)
             self.if_pipeline = iforest
             result["if_samples"] = len(live_logs)
+            result["if_contamination"] = dynamic_contam
         elif self.if_pipeline is None:
             X_synth = _synthetic_normal(500)
             iforest = Pipeline([

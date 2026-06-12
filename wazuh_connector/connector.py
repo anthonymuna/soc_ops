@@ -29,22 +29,58 @@ WAZUH_SSH_USER       = os.getenv("WAZUH_SSH_USER", "ubuntu")
 WAZUH_SSH_HOST       = os.getenv("WAZUH_SSH_HOST", "10.107.7.150")
 WAZUH_SSH_KEY        = os.getenv("WAZUH_SSH_KEY", "/app/dc_siem.pem")
 WAZUH_ALERTS_FILE    = os.getenv("WAZUH_ALERTS_FILE", "/var/ossec/logs/alerts/alerts.json")
+WAZUH_ARCHIVES_FILE  = os.getenv("WAZUH_ARCHIVES_FILE", "/var/ossec/logs/archives/archives.json")
 WAZUH_ALERT_TAIL_LINES = int(os.getenv("WAZUH_ALERT_TAIL_LINES", "2000"))
 POLL_INTERVAL        = int(os.getenv("POLL_INTERVAL", "30"))
 MANAGER_LOG_LIMIT    = int(os.getenv("MANAGER_LOG_LIMIT", "100"))
 ALERT_FETCH_MINUTES  = int(os.getenv("ALERT_FETCH_MINUTES", "2"))
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
-HEADERS = {"Authorization": f"Bearer {WAZUH_JWT_TOKEN}"}
+WAZUH_API_USER       = os.getenv("WAZUH_API_USER", "wazuh-wui")
+WAZUH_API_PASS       = os.getenv("WAZUH_API_PASS", "")
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+HEADERS = {}
+if WAZUH_JWT_TOKEN:
+    HEADERS["Authorization"] = f"Bearer {WAZUH_JWT_TOKEN}"
+
+def get_wazuh_token():
+    if not WAZUH_API_PASS:
+        logger.warning("No WAZUH_API_PASS configured. Cannot generate API token.")
+        return False
+        
+    url = f"{WAZUH_API_URL}/security/user/authenticate"
+    try:
+        resp = requests.post(url, auth=(WAZUH_API_USER, WAZUH_API_PASS), verify=False, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        token = data.get("data", {}).get("token")
+        if token:
+            HEADERS["Authorization"] = f"Bearer {token}"
+            return True
+        logger.error("Wazuh API authentication failed: No token in response")
+    except Exception as exc:
+        logger.error("Wazuh API authentication failed: %s", exc)
+    return False
 
 def wazuh_get(path: str, params: dict = None):
     """GET from Wazuh REST API, return data dict or None."""
     url = f"{WAZUH_API_URL}{path}"
+    
+    if "Authorization" not in HEADERS:
+        if not get_wazuh_token():
+            return None
+
     try:
-        resp = requests.get(url, headers=HEADERS, params=params,
-                            verify=False, timeout=15)
+        resp = requests.get(url, headers=HEADERS, params=params, verify=False, timeout=15)
+        
+        # Refresh token on 401 Unauthorized
+        if resp.status_code == 401:
+            logger.info("Wazuh API token expired. Refreshing...")
+            if get_wazuh_token():
+                resp = requests.get(url, headers=HEADERS, params=params, verify=False, timeout=15)
+            else:
+                return None
+                
         resp.raise_for_status()
         data = resp.json()
         if data.get("error") == 0:
@@ -112,7 +148,7 @@ def _parse_wazuh_ts(value: str) -> datetime | None:
         return None
 
 
-def fetch_wazuh_alerts_from_ssh(minutes_back: int = 2) -> list[dict]:
+def fetch_wazuh_logs_from_ssh(file_path: str, minutes_back: int = 2) -> list[dict]:
     since = datetime.now(timezone.utc) - timedelta(minutes=minutes_back)
     remote = f"{WAZUH_SSH_USER}@{WAZUH_SSH_HOST}"
     cmd = [
@@ -122,7 +158,7 @@ def fetch_wazuh_alerts_from_ssh(minutes_back: int = 2) -> list[dict]:
         "-o", "UserKnownHostsFile=/dev/null",
         "-o", "ConnectTimeout=15",
         remote,
-        f"sudo tail -n {WAZUH_ALERT_TAIL_LINES} {WAZUH_ALERTS_FILE}",
+        f"sudo tail -n {WAZUH_ALERT_TAIL_LINES} {file_path}",
     ]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=True)
@@ -325,7 +361,9 @@ def main():
                     minutes_back=ALERT_FETCH_MINUTES
                 )
             elif WAZUH_ALERT_SOURCE == "ssh_file":
-                alerts = fetch_wazuh_alerts_from_ssh(minutes_back=ALERT_FETCH_MINUTES)
+                alerts = fetch_wazuh_logs_from_ssh(WAZUH_ALERTS_FILE, minutes_back=ALERT_FETCH_MINUTES)
+                archives = fetch_wazuh_logs_from_ssh(WAZUH_ARCHIVES_FILE, minutes_back=ALERT_FETCH_MINUTES)
+                alerts.extend(archives)
 
         agent_alert_counts: dict = {}
         for alert in alerts:

@@ -280,7 +280,7 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
   const onFeedback = async (alert, label) => {
     const alertId = getAlertId(alert)
     try {
-      const resp = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/feedback`, {
+      const resp = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/feedback/`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

@@ -110,6 +110,8 @@ services:
     container_name: syndicate4-wazuh-connector
     environment:
       - WAZUH_API_URL=https://127.0.0.1:55000
+      - WAZUH_API_USER=${WAZUH_API_USER:-wazuh-wui}
+      - WAZUH_API_PASS=${WAZUH_API_PASS}
       - WAZUH_JWT_TOKEN=${WAZUH_JWT_TOKEN}
       - WAZUH_INDEXER_HOST=https://127.0.0.1:9201
       - WAZUH_INDEXER_USER=${WAZUH_INDEXER_USER:-admin}
@@ -169,6 +171,7 @@ services:
       - AUTH_USERNAME=${AUTH_USERNAME:-admin}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-admin}
       - NOTIFY_WEBHOOK_URL=${NOTIFY_WEBHOOK_URL:-}
+      - WHITELISTED_IPS=${WHITELISTED_IPS:-}
     networks:
       - syndicate4
     depends_on:

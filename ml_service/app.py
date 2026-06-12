@@ -49,6 +49,8 @@ TOKEN_TTL_HOURS = 8
 NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "")
 FEEDBACK_INDEX = "syndicate4-feedback"
 
+WHITELISTED_IPS = [ip.strip() for ip in os.getenv("WHITELISTED_IPS", "").split(",") if ip.strip()]
+
 es       = Elasticsearch(ES_HOST, request_timeout=30)
 detector = AnomalyDetector()
 bearer   = HTTPBearer()
@@ -107,6 +109,11 @@ def _fetch_logs(minutes_back: int = 5, size: int = 500, normal_only: bool = Fals
 
 def _write_alerts(alerts: list[dict]):
     for alert in alerts:
+        src = alert.get("src_ip")
+        dst = alert.get("dst_ip")
+        if src in WHITELISTED_IPS or dst in WHITELISTED_IPS:
+            continue
+            
         try:
             aid = f"{alert.get('ml_detected_at','')}{alert.get('src_ip','')}{alert.get('event_type','')}"
             es.index(index=ALERT_INDEX, id=aid, document=alert)
@@ -178,10 +185,12 @@ def run_scan():
             return
         alerts = detector.predict(logs)
         if alerts:
-            stats["anomalies_detected"] += len(alerts)
-            _write_alerts(alerts)
-            logger.info(f"ML: {len(alerts)} anomalies")
-            for alert in alerts:
+            filtered_alerts = [a for a in alerts if a.get("src_ip") not in WHITELISTED_IPS and a.get("dst_ip") not in WHITELISTED_IPS]
+            
+            stats["anomalies_detected"] += len(filtered_alerts)
+            _write_alerts(filtered_alerts)
+            logger.info(f"ML: {len(filtered_alerts)} anomalies (suppressed {len(alerts) - len(filtered_alerts)})")
+            for alert in filtered_alerts:
                 if alert.get("ml_severity") in ("critical", "high"):
                     _send_notification(alert)
     except Exception as e:
@@ -240,10 +249,12 @@ def _kafka_consumer_thread():
                 if detector.is_trained():
                     alerts = detector.predict(buffer)
                     if alerts:
-                        stats["anomalies_detected"] += len(alerts)
-                        _write_alerts(alerts)
-                        logger.info(f"ML: {len(alerts)} anomalies from {len(buffer)} Kafka logs")
-                        for alert in alerts:
+                        filtered_alerts = [a for a in alerts if a.get("src_ip") not in WHITELISTED_IPS and a.get("dst_ip") not in WHITELISTED_IPS]
+                        
+                        stats["anomalies_detected"] += len(filtered_alerts)
+                        _write_alerts(filtered_alerts)
+                        logger.info(f"ML: {len(filtered_alerts)} anomalies from {len(buffer)} Kafka logs (suppressed {len(alerts) - len(filtered_alerts)})")
+                        for alert in filtered_alerts:
                             if alert.get("ml_severity") in ("critical", "high"):
                                 _send_notification(alert)
                 else:
@@ -323,12 +334,24 @@ def health(_token: str = Depends(_verify_token)):
 
 
 @app.get("/stats")
-def get_stats(_token: str = Depends(_verify_token)):
+def get_stats(connector: str = None, _token: str = Depends(_verify_token)):
     try:
-        es_count = es.count(index="syndicate4-logs-*")["count"]
-    except Exception:
-        es_count = stats["logs_scanned"]
-    return {**stats, "logs_scanned": es_count}
+        query = {"query": {"match_all": {}}}
+        if connector:
+            query = {"query": {"term": {"connector.keyword": connector}}}
+            
+        es_logs_count = es.count(index="syndicate4-logs-*", body=query)["count"]
+        es_alerts_count = es.count(index="syndicate4-ml-alerts", body=query)["count"]
+        
+        return {
+            **stats, 
+            "logs_scanned": es_logs_count,
+            "anomalies_detected": es_alerts_count
+        }
+    except Exception as e:
+        logger.warning(f"Failed to fetch stats from ES: {e}")
+        # Fallback to global in-memory stats
+        return {**stats, "logs_scanned": stats["logs_scanned"]}
 
 
 @app.get("/alerts")
@@ -404,13 +427,15 @@ def scan_live(req: ScanLiveRequest):
             
         alerts = detector.predict(req.logs)
         if alerts:
-            stats["anomalies_detected"] += len(alerts)
-            _write_alerts(alerts)
-            logger.info(f"ML scan_live: {len(alerts)} anomalies from {len(req.logs)} logs")
-            for alert in alerts:
+            filtered_alerts = [a for a in alerts if a.get("src_ip") not in WHITELISTED_IPS and a.get("dst_ip") not in WHITELISTED_IPS]
+            
+            stats["anomalies_detected"] += len(filtered_alerts)
+            _write_alerts(filtered_alerts)
+            logger.info(f"ML scan_live: {len(filtered_alerts)} anomalies from {len(req.logs)} logs (suppressed {len(alerts) - len(filtered_alerts)})")
+            for alert in filtered_alerts:
                 if alert.get("ml_severity") in ("critical", "high"):
                     _send_notification(alert)
-        return {"scanned": len(req.logs), "anomalies": len(alerts)}
+        return {"scanned": len(req.logs), "anomalies": len(filtered_alerts) if alerts else 0}
     except Exception as e:
         stats["scan_errors"] += 1
         logger.error(f"Scan_live error: {e}")

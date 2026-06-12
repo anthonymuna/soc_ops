@@ -16,7 +16,7 @@ async function fetchJson(url, onUnauth) {
   return r.json()
 }
 
-export function useSOC(refreshMs = 10000, onUnauth) {
+export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
   const [health,   setHealth]   = useState(null)
   const [stats,    setStats]    = useState(null)
   const [alerts,   setAlerts]   = useState([])
@@ -26,10 +26,15 @@ export function useSOC(refreshMs = 10000, onUnauth) {
 
   const refresh = useCallback(async () => {
     try {
+      const qs = selectedConnector ? `?connector=${encodeURIComponent(selectedConnector)}` : ''
+      const alertQs = selectedConnector 
+        ? `?limit=200&minutes=60&connector=${encodeURIComponent(selectedConnector)}`
+        : `?limit=200&minutes=60`
+
       const [h, s, a] = await Promise.allSettled([
-        fetchJson(`${ML_API}/health`,                onUnauth),
-        fetchJson(`${ML_API}/stats`,                 onUnauth),
-        fetchJson(`${ML_API}/alerts?limit=200&minutes=360`, onUnauth),
+        fetchJson(`${ML_API}/health/`, onUnauth),
+        fetchJson(`${ML_API}/stats/${qs}`, onUnauth),
+        fetchJson(`${ML_API}/alerts/${alertQs}`, onUnauth),
       ])
       if (h.status === 'fulfilled') setHealth(h.value)
       if (s.status === 'fulfilled') setStats(s.value)
@@ -52,7 +57,7 @@ export function useSOC(refreshMs = 10000, onUnauth) {
     } catch (e) {
       setError(e.message)
     }
-  }, [onUnauth])
+  }, [onUnauth, selectedConnector])
 
   useEffect(() => {
     refresh()

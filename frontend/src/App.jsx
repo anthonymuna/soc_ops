@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Shield, AlertTriangle, Database, Cpu, RefreshCw, Wifi, WifiOff, LogOut, Sun, Moon, FlaskConical, LayoutDashboard, Settings, X } from 'lucide-react'
+import { Shield, AlertTriangle, Database, Cpu, RefreshCw, Wifi, WifiOff, LogOut, Sun, Moon, FlaskConical, LayoutDashboard, Settings, X, Menu, ChevronDown } from 'lucide-react'
 import { useSOC } from './hooks/useSOC'
 import { isLoggedIn, logout, getToken, updateUserCards } from './auth'
 import LoginPage from './components/LoginPage'
@@ -52,7 +52,9 @@ export default function App() {
 function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
   const [tab, setTab] = useState('dashboard')
   const [selectedMitreId, setSelectedMitreId] = useState(null)
-  const { health, stats, alerts, history, error, lastTick, refresh } = useSOC(10000, onUnauth)
+  const [selectedConnector, setSelectedConnector] = useState('wazuh')
+  const [showConnectorMenu, setShowConnectorMenu] = useState(false)
+  const { health, stats, alerts, history, error, lastTick, refresh } = useSOC(10000, onUnauth, selectedConnector)
   
   const [user, setUser] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -105,9 +107,32 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
       <header className="border-b border-soc-border bg-soc-panel/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <div className="relative">
+              <button 
+                onClick={() => setShowConnectorMenu(!showConnectorMenu)}
+                className="flex items-center gap-2 text-slate-300 hover:text-cyan-400 transition-colors bg-soc-panel/50 px-2 py-1.5 rounded border border-soc-border hover:border-cyan-500/50"
+              >
+                <Menu className="w-5 h-5" />
+                <span className="text-xs font-bold uppercase tracking-wider hidden sm:inline">{selectedConnector === 'umbrella' ? 'Cisco Umbrella' : selectedConnector}</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              {showConnectorMenu && (
+                <div className="absolute top-full left-0 mt-2 w-48 bg-soc-bg border border-soc-border rounded shadow-xl overflow-hidden z-50">
+                  {['wazuh', 'fortisiem', 'umbrella'].map(c => (
+                    <button
+                      key={c}
+                      onClick={() => { setSelectedConnector(c); setShowConnectorMenu(false); }}
+                      className={`w-full text-left px-4 py-2 text-xs uppercase tracking-wider transition-colors ${selectedConnector === c ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:bg-soc-panel hover:text-slate-200'}`}
+                    >
+                      {c === 'umbrella' ? 'Cisco Umbrella' : c}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 object-contain rounded bg-white/5" />
-            <span className="font-bold text-cyan-400 tracking-widest text-sm">NGAO SOC</span>
-            <span className="text-slate-600 text-xs hidden sm:inline">AI-BASED CYBER THREAT DETECTION</span>
+            <span className="font-bold text-cyan-400 tracking-widest text-sm hidden sm:inline">NGAO SOC</span>
+            <span className="text-slate-600 text-xs hidden lg:inline">AI-BASED CYBER THREAT DETECTION</span>
             <div className="hidden sm:flex items-center gap-1 ml-2">
               {[
                 { id: 'dashboard', icon: <LayoutDashboard className="w-3 h-3" />, label: 'Dashboard' },
@@ -278,8 +303,10 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           </div>
 
           {/* Alert feed — takes 2 cols (Middle) */}
-          <div className="lg:col-span-2 flex flex-col min-h-[24rem]">
-            {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />}
+          <div className="lg:col-span-2 relative min-h-[24rem]">
+            <div className="absolute inset-0 flex flex-col">
+              {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />}
+            </div>
           </div>
 
           {/* Right panel */}
