@@ -89,7 +89,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: 168
-      CLUSTER_ID: syndicate4-cluster
+      CLUSTER_ID: LelM2dIFQkiUFvXCEcqRWA
     volumes:
       - ./kafka/entrypoint.sh:/entrypoint.sh
     command: /entrypoint.sh
