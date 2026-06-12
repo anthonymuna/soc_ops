@@ -2,7 +2,7 @@
 set -e
 
 echo "Waiting for postgres..."
-while ! pg_isready -U "${POSTGRES_USER:-syndicate4}" -h "postgres" -p "5432" > /dev/null 2>&1; do
+while ! nc -z postgres 5432; do
   sleep 2
 done
 
