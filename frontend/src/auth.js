@@ -17,7 +17,7 @@ export function isLoggedIn() {
 }
 
 export async function login(username, password) {
-  const r = await fetch('/api/auth/login', {
+  const r = await fetch('/api/auth/login/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -48,7 +48,7 @@ export async function updateUserCards(cards) {
 export async function logout() {
   const token = getToken()
   if (token) {
-    await fetch('/api/auth/logout', {
+    await fetch('/api/auth/logout/', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => {})
