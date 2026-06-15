@@ -8,7 +8,7 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - xpack.license.self_generated.type=basic
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
       - bootstrap.memory_lock=true
     ulimits:
       memlock:
@@ -109,11 +109,11 @@ services:
     build: ./wazuh_connector
     container_name: syndicate4-wazuh-connector
     environment:
-      - WAZUH_API_URL=https://127.0.0.1:55000
+      - WAZUH_API_URL=https://10.107.7.150:55000
       - WAZUH_API_USER=${WAZUH_API_USER:-wazuh-wui}
       - WAZUH_API_PASS=${WAZUH_API_PASS}
       - WAZUH_JWT_TOKEN=${WAZUH_JWT_TOKEN}
-      - WAZUH_INDEXER_HOST=https://127.0.0.1:9201
+      - WAZUH_INDEXER_HOST=https://10.107.7.150:9201
       - WAZUH_INDEXER_USER=${WAZUH_INDEXER_USER:-admin}
       - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASS}
       - WAZUH_ALERTS_ENABLED=${WAZUH_ALERTS_ENABLED:-true}

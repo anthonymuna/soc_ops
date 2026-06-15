@@ -59,6 +59,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
   const [user, setUser] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
   const [visibleCards, setVisibleCards] = useState([])
+  const [alertFilter, setAlertFilter] = useState('all')
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -113,18 +114,26 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
                 className="flex items-center gap-2 text-slate-300 hover:text-cyan-400 transition-colors bg-soc-panel/50 px-2 py-1.5 rounded border border-soc-border hover:border-cyan-500/50"
               >
                 <Menu className="w-5 h-5" />
-                <span className="text-xs font-bold uppercase tracking-wider hidden sm:inline">{selectedConnector === 'umbrella' ? 'Cisco Umbrella' : selectedConnector}</span>
+                <span className="text-xs font-bold uppercase tracking-wider hidden sm:inline">
+                  {selectedConnector === 'umbrella' ? 'Cisco Umbrella' : 
+                   selectedConnector === 'predictive_analysis' ? 'Predictive Analysis' :
+                   selectedConnector === 'threat_intelligence' ? 'Threat Intelligence' : 
+                   selectedConnector}
+                </span>
                 <ChevronDown className="w-3 h-3" />
               </button>
               {showConnectorMenu && (
                 <div className="absolute top-full left-0 mt-2 w-48 bg-soc-bg border border-soc-border rounded shadow-xl overflow-hidden z-50">
-                  {['wazuh', 'fortisiem', 'umbrella'].map(c => (
+                  {['wazuh', 'fortisiem', 'umbrella', 'predictive_analysis', 'threat_intelligence'].map(c => (
                     <button
                       key={c}
                       onClick={() => { setSelectedConnector(c); setShowConnectorMenu(false); }}
                       className={`w-full text-left px-4 py-2 text-xs uppercase tracking-wider transition-colors ${selectedConnector === c ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:bg-soc-panel hover:text-slate-200'}`}
                     >
-                      {c === 'umbrella' ? 'Cisco Umbrella' : c}
+                      {c === 'umbrella' ? 'Cisco Umbrella' : 
+                       c === 'predictive_analysis' ? 'Predictive Analysis' :
+                       c === 'threat_intelligence' ? 'Threat Intelligence' : 
+                       c}
                     </button>
                   ))}
                 </div>
@@ -234,6 +243,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
               sub={`${anomalyRate ?? 0}% anomaly rate`}
               color="soc-red"
               icon={<AlertTriangle className="w-4 h-4" />}
+              onClick={() => { setAlertFilter('all'); setSelectedMitreId(null); document.getElementById('alert-feed')?.scrollIntoView({ behavior: 'smooth' }); }}
             />
           )}
           {isVisible('stat_critical') && (
@@ -241,6 +251,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
               label="Critical"
               value={criticalCount}
               color="soc-red"
+              onClick={() => { setAlertFilter('critical'); setSelectedMitreId(null); document.getElementById('alert-feed')?.scrollIntoView({ behavior: 'smooth' }); }}
             />
           )}
           {isVisible('stat_high') && (
@@ -248,6 +259,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
               label="High"
               value={highCount}
               color="soc-yellow"
+              onClick={() => { setAlertFilter('high'); setSelectedMitreId(null); document.getElementById('alert-feed')?.scrollIntoView({ behavior: 'smooth' }); }}
             />
           )}
           {isVisible('stat_session') && (
@@ -303,9 +315,9 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           </div>
 
           {/* Alert feed — takes 2 cols (Middle) */}
-          <div className="lg:col-span-2 relative min-h-[24rem]">
+          <div id="alert-feed" className="lg:col-span-2 relative min-h-[24rem]">
             <div className="absolute inset-0 flex flex-col">
-              {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} />}
+              {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} filter={alertFilter} onFilterChange={setAlertFilter} />}
             </div>
           </div>
 

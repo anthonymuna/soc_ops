@@ -13,8 +13,25 @@ export default function LoginPage({ onLogin }) {
   async function handleSubmit(e) {
     e.preventDefault()
     if (role === 'admin') {
-      // Redirect to Django admin, ignoring JWT auth since Django admin uses session auth
-      window.location.href = `http://${window.location.hostname}:8088/admin/`
+      // Create an invisible form to submit directly to the Django SSO endpoint
+      const form = document.createElement('form')
+      form.method = 'POST'
+      form.action = `http://${window.location.hostname}:8088/api/auth/admin-sso/`
+      
+      const userField = document.createElement('input')
+      userField.type = 'hidden'
+      userField.name = 'username'
+      userField.value = username
+      form.appendChild(userField)
+
+      const passField = document.createElement('input')
+      passField.type = 'hidden'
+      passField.name = 'password'
+      passField.value = password
+      form.appendChild(passField)
+
+      document.body.appendChild(form)
+      form.submit()
       return
     }
 
@@ -93,7 +110,7 @@ export default function LoginPage({ onLogin }) {
                     type="text"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
-                    required={role === 'user'}
+                    required
                     autoFocus
                     autoComplete="username"
                     className="w-full bg-black/40 border border-cyan-500/20 rounded-lg pl-10 pr-3 py-3
@@ -116,7 +133,7 @@ export default function LoginPage({ onLogin }) {
                     type="password"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    required={role === 'user'}
+                    required
                     autoComplete="current-password"
                     className="w-full bg-black/40 border border-cyan-500/20 rounded-lg pl-10 pr-3 py-3
                               text-sm text-cyan-100 placeholder-slate-600

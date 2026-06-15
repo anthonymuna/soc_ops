@@ -1,4 +1,4 @@
-export default function StatCard({ label, value, sub, color = 'soc-accent', icon }) {
+export default function StatCard({ label, value, sub, color = 'soc-accent', icon, onClick }) {
   const colorMap = {
     'soc-accent':  'text-cyan-400 border-cyan-400/20',
     'soc-green':   'text-emerald-400 border-emerald-400/20',
@@ -9,7 +9,10 @@ export default function StatCard({ label, value, sub, color = 'soc-accent', icon
   const cls = colorMap[color] || colorMap['soc-accent']
 
   return (
-    <div className={`bg-soc-panel border ${cls} rounded-lg p-4 flex flex-col gap-1`}>
+    <div 
+      onClick={onClick}
+      className={`bg-soc-panel border ${cls} rounded-lg p-4 flex flex-col gap-1 ${onClick ? 'cursor-pointer hover:bg-white/[0.02] transition-colors hover:shadow-lg' : ''}`}
+    >
       <div className="flex items-center justify-between">
         <span className="text-xs text-slate-500 uppercase tracking-widest">{label}</span>
         {icon && <span className="text-slate-600">{icon}</span>}

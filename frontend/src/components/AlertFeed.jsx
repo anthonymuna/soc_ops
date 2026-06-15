@@ -224,8 +224,7 @@ function IPCorrelationDrawer({ ip, history, onClose }) {
 }
 
 // ── Main AlertFeed ────────────────────────────────────────────────────────────
-export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
-  const [filter,    setFilter]    = useState('all')
+export default function AlertFeed({ alerts, history = [], selectedMitreId, filter = 'all', onFilterChange }) {
   const [expanded,  setExpanded]  = useState(null)
   const [ipDrawer,  setIpDrawer]  = useState(null)
   const [feedbackSent, setFeedbackSent] = useState({})
@@ -301,14 +300,17 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId }) {
       <div className="bg-soc-panel border border-soc-border rounded-lg flex flex-col h-full">
         {/* toolbar */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-soc-border">
-          <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">
+          <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest flex gap-2 items-center">
             Live Alert Feed
+            <span className="bg-cyan-500/10 text-cyan-500 px-2 py-0.5 rounded-full text-[10px] border border-cyan-500/20">
+              {filtered.length} Alerts ({dedupedFiltered.length} groups)
+            </span>
           </span>
           <div className="flex gap-1">
             {['all','critical','high','medium','low'].map(f => (
               <button
                 key={f}
-                onClick={() => setFilter(f)}
+                onClick={() => onFilterChange ? onFilterChange(f) : null}
                 className={`text-[10px] px-2 py-0.5 rounded capitalize transition-colors
                   ${filter === f
                     ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/40'

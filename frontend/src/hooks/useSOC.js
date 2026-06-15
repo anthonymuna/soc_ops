@@ -26,10 +26,12 @@ export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
 
   const refresh = useCallback(async () => {
     try {
-      const qs = selectedConnector ? `?connector=${encodeURIComponent(selectedConnector)}` : ''
-      const alertQs = selectedConnector 
-        ? `?limit=200&minutes=60&connector=${encodeURIComponent(selectedConnector)}`
-        : `?limit=200&minutes=60`
+      // Route predictive analysis to use wazuh data for now
+      const actualConnector = selectedConnector === 'predictive_analysis' ? 'wazuh' : selectedConnector;
+      const qs = actualConnector ? `?connector=${encodeURIComponent(actualConnector)}` : ''
+      const alertQs = actualConnector 
+        ? `?limit=200&minutes=100800&connector=${encodeURIComponent(actualConnector)}`
+        : `?limit=200&minutes=100800`
 
       const [h, s, a] = await Promise.allSettled([
         fetchJson(`${ML_API}/health/`, onUnauth),
