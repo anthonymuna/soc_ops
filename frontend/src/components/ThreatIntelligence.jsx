@@ -1,17 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useSOC } from '../hooks/useSOC';
+import { fetchJson, ML_API } from '../hooks/useSOC';
 
 const ThreatIntelligence = ({ onUnauth }) => {
   const [intel, setIntel] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { fetchWithAuth } = useSOC(onUnauth);
 
   const fetchIntel = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchWithAuth('/api/alerts/threat-intelligence/');
+      const data = await fetchJson(`${ML_API}/alerts/threat-intelligence/`, onUnauth);
       if (data.error) {
         setError(data.error);
       } else {
