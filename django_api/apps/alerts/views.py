@@ -208,7 +208,7 @@ class ThreatIntelligenceView(APIView):
         import geoip2.webservice
         import geoip2.errors
         from datetime import datetime, timezone, timedelta
-        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(days=70)).isoformat()
         
         try:
             resp = es.search(
