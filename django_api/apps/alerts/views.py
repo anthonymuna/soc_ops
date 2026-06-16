@@ -124,7 +124,7 @@ class MLProxyView(APIView):
 
 class PredictiveAnalysisView(APIView):
     def get(self, request):
-        limit = int(request.GET.get('limit', 40))
+        limit = int(request.GET.get('limit', 25))
         from datetime import datetime, timezone, timedelta
         since = (datetime.now(timezone.utc) - timedelta(days=70)).isoformat()
         
@@ -153,6 +153,8 @@ class PredictiveAnalysisView(APIView):
             ts = a.get('ml_detected_at', '')
             evt = a.get('event_type', '')
             desc = a.get('wazuh_description', '')
+            if len(desc) > 100:
+                desc = desc[:97] + '...'
             src = a.get('src_ip', 'Unknown')
             dst = a.get('dst_ip', 'Unknown')
             mitre = a.get('mitre_techniques', [])
