@@ -17,7 +17,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq --allow-insecure-repositories 2>&1 || apt-get update -qq 2>&1 || true
 apt-get install -y -qq \
   docker.io \
-  docker compose \
+  docker-compose-v2 \
   tmux \
   curl \
   wget \
