@@ -23,4 +23,4 @@ if [ "$DJANGO_SUPERUSER_USERNAME" ] && [ "$DJANGO_SUPERUSER_PASSWORD" ]; then
 fi
 
 echo "Starting Gunicorn..."
-exec gunicorn syndicate4.wsgi:application --bind 0.0.0.0:8080 --workers 4
+exec gunicorn syndicate4.wsgi:application --bind 0.0.0.0:8080 --workers 4 --timeout 120

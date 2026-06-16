@@ -12,6 +12,13 @@ export default function ModelStatus({ health }) {
 
       <div className="flex flex-col gap-2">
         <ModelRow
+          label="Qwen2.5-3B-Instruct"
+          desc="Predictive Threat Analysis & MITRE Mapping"
+          active={true}
+          tag="GENERATIVE"
+          tagColor="cyan"
+        />
+        <ModelRow
           label="RandomForest — NSL-KDD"
           desc="41-feature attack classification (DoS/Probe/R2L/U2R)"
           active={health.nsl_kdd_trained}

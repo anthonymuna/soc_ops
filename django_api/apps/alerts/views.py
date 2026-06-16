@@ -121,3 +121,77 @@ class MLProxyView(APIView):
 
     def post(self, request, *args, **kwargs):
         return self.handle_request(request, kwargs.get('path', ''))
+
+class PredictiveAnalysisView(APIView):
+    def get(self, request):
+        limit = int(request.GET.get('limit', 150))
+        from datetime import datetime, timezone, timedelta
+        since = (datetime.now(timezone.utc) - timedelta(days=70)).isoformat()
+        
+        must_clauses = [
+            {"range": {"ml_detected_at": {"gte": since}}},
+            {"term": {"connector.keyword": "wazuh"}}
+        ]
+        try:
+            resp = es.search(
+                index="syndicate4-ml-alerts",
+                body={
+                    "query": {"bool": {"must": must_clauses}},
+                    "size": limit,
+                    "sort": [{"ml_detected_at": {"order": "desc"}}],
+                },
+            )
+            alerts = [h["_source"] for h in resp["hits"]["hits"]]
+        except NotFoundError:
+            alerts = []
+
+        if not alerts:
+            return Response({"analysis": "No recent Wazuh anomalies found to perform predictive analysis."})
+
+        prompt_lines = ["Analyze the following recent security anomalies and predict potential attacker intent or next steps. Highlight critical risks:\n"]
+        for a in alerts:
+            ts = a.get('ml_detected_at', '')
+            evt = a.get('event_type', '')
+            desc = a.get('wazuh_description', '')
+            src = a.get('src_ip', 'Unknown')
+            dst = a.get('dst_ip', 'Unknown')
+            mitre = a.get('mitre_techniques', [])
+            prompt_lines.append(f"- Time: {ts} | Type: {evt} | Desc: {desc} | Src: {src} | Dst: {dst} | MITRE: {mitre}")
+        
+        prompt = "\n".join(prompt_lines)
+        
+        system_prompt = (
+            "You are a senior SOC analyst. Provide a predictive threat analysis of the provided anomalies. "
+            "IMPORTANT: Interconnect your analysis with the MITRE ATT&CK framework. "
+            "The system actively monitors these specific MITRE techniques: "
+            "T1046 (Net Scan), T1018 (Remote Sys), T1049 (Net Conns), T1057 (Proc Disc), T1082 (Sys Info), T1083 (File Disc), "
+            "T1078 (Valid Accts), T1110 (Brute Force), T1110.001 (Pwd Guess), T1021 (Remote Svc), T1041 (Exfil C2), "
+            "T1071 (C2 Beacon), T1105 (Tool Transfer), T1059 (Cmd Exec), T1068 (Priv Esc), T1498 (Net DoS). "
+            "You must explicitly predict the NEXT likely MITRE techniques the attacker will attempt from this list, "
+            "and explain how the current anomalies map to the MITRE framework."
+        )
+
+        payload = {
+            "model": "Qwen/Qwen2.5-3B-Instruct",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 1500
+        }
+        
+        try:
+            with httpx.Client(verify=False) as client:
+                res = client.post(
+                    "https://10.101.7.72/v1/chat/completions",
+                    headers={"Authorization": "Bearer 57be7935b6f361750802cd937f3252d21ce14eab9b8acfcf9a40e53e7cf13486"},
+                    json=payload,
+                    timeout=45
+                )
+                res.raise_for_status()
+                data = res.json()
+                analysis = data['choices'][0]['message']['content']
+        except Exception as e:
+            return Response({"error": f"Failed to reach Qwen AI: {str(e)}"}, status=500)
+            
+        return Response({"analysis": analysis})

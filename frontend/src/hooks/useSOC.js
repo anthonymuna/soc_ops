@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getToken, clearToken } from '../auth'
 
-const ML_API = import.meta.env.VITE_ML_API || '/api'
+export const ML_API = import.meta.env.VITE_ML_API || '/api'
 
-async function fetchJson(url, onUnauth) {
+export async function fetchJson(url, onUnauth) {
   const token = getToken()
   const r = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -26,11 +26,9 @@ export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
 
   const refresh = useCallback(async () => {
     try {
-      // Route predictive analysis to use wazuh data for now
-      const actualConnector = selectedConnector === 'predictive_analysis' ? 'wazuh' : selectedConnector;
-      const qs = actualConnector ? `?connector=${encodeURIComponent(actualConnector)}` : ''
-      const alertQs = actualConnector 
-        ? `?limit=200&minutes=100800&connector=${encodeURIComponent(actualConnector)}`
+      const qs = selectedConnector ? `?connector=${encodeURIComponent(selectedConnector)}` : ''
+      const alertQs = selectedConnector 
+        ? `?limit=200&minutes=100800&connector=${encodeURIComponent(selectedConnector)}`
         : `?limit=200&minutes=100800`
 
       const [h, s, a] = await Promise.allSettled([

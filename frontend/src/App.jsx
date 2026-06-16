@@ -11,7 +11,7 @@ import ModelStatus from './components/ModelStatus'
 import ModelTestPage from './components/ModelTestPage'
 import ReportGenerator from './components/ReportGenerator'
 import AlertMap from './components/AlertMap'
-
+import PredictiveAnalysis from './components/PredictiveAnalysis'
 const ALL_CARDS = [
   { id: 'stat_logs', label: 'Logs Scanned (Stat)' },
   { id: 'stat_alerts', label: 'ML Alerts (Stat)' },
@@ -317,7 +317,11 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           {/* Alert feed — takes 2 cols (Middle) */}
           <div id="alert-feed" className="lg:col-span-2 relative min-h-[24rem]">
             <div className="absolute inset-0 flex flex-col">
-              {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} filter={alertFilter} onFilterChange={setAlertFilter} />}
+              {selectedConnector === 'predictive_analysis' ? (
+                <PredictiveAnalysis onUnauth={onUnauth} />
+              ) : (
+                isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} filter={alertFilter} onFilterChange={setAlertFilter} />
+              )}
             </div>
           </div>
 
