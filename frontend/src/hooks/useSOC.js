@@ -12,8 +12,12 @@ export async function fetchJson(url, onUnauth) {
     onUnauth()
     throw new Error('Unauthorized')
   }
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return r.json()
+  let data;
+  try { data = await r.json() } catch(e) {}
+  if (!r.ok) {
+    throw new Error(data?.error || `HTTP ${r.status}`)
+  }
+  return data
 }
 
 export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
