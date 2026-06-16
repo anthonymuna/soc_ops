@@ -778,7 +778,7 @@ class AnomalyDetector:
                     live_class, live_conf, zs_label, zs_score,
                     is_if_anomaly, is_label_attack, is_live_attack, is_zs_attack,
                 )
-                results.append({
+                result_dict = {
                     **log,
                     "ml_anomaly": True,
                     "ml_if_score": round(float(if_score), 4),
