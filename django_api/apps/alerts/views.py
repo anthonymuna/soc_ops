@@ -124,7 +124,7 @@ class MLProxyView(APIView):
 
 class PredictiveAnalysisView(APIView):
     def get(self, request):
-        limit = int(request.GET.get('limit', 150))
+        limit = int(request.GET.get('limit', 40))
         from datetime import datetime, timezone, timedelta
         since = (datetime.now(timezone.utc) - timedelta(days=70)).isoformat()
         
@@ -177,7 +177,7 @@ class PredictiveAnalysisView(APIView):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 1500
+            "max_tokens": 800
         }
         
         try:
