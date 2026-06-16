@@ -117,6 +117,7 @@ services:
       - WAZUH_INDEXER_USER=${WAZUH_INDEXER_USER:-admin}
       - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASS}
       - WAZUH_ALERTS_ENABLED=${WAZUH_ALERTS_ENABLED:-true}
+      - WAZUH_ALERT_SOURCE=indexer
       - ES_HOST=http://elasticsearch:9200
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     networks:
