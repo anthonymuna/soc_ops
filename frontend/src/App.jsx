@@ -227,7 +227,13 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
 
       <main className={`max-w-screen-xl mx-auto px-4 py-4 space-y-4 ${tab !== 'dashboard' ? 'hidden' : ''}`}>
 
-        {/* Stat row */}
+        {selectedConnector === 'predictive_analysis' ? (
+          <PredictiveAnalysis onUnauth={onUnauth} />
+        ) : selectedConnector === 'threat_intelligence' ? (
+          <ThreatIntelligence onUnauth={onUnauth} />
+        ) : (
+          <>
+            {/* Stat row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
           {isVisible('stat_logs') && (
             <StatCard
@@ -317,13 +323,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           {/* Alert feed — takes 2 cols (Middle) */}
           <div id="alert-feed" className="lg:col-span-2 relative min-h-[24rem]">
             <div className="absolute inset-0 flex flex-col">
-              {selectedConnector === 'predictive_analysis' ? (
-                <PredictiveAnalysis onUnauth={onUnauth} />
-              ) : selectedConnector === 'threat_intelligence' ? (
-                <ThreatIntelligence onUnauth={onUnauth} />
-              ) : (
-                isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} filter={alertFilter} onFilterChange={setAlertFilter} />
-              )}
+              {isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} filter={alertFilter} onFilterChange={setAlertFilter} />}
             </div>
           </div>
 
@@ -336,7 +336,8 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
 
         {/* RF class breakdown */}
         {isVisible('class_breakdown') && history.length > 0 && <AttackClassBreakdown history={history} />}
-
+          </>
+        )}
       </main>
 
       <footer className="border-t border-soc-border mt-8 py-3 text-center text-[10px] text-slate-700">
