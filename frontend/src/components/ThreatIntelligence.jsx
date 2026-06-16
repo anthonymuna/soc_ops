@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import useSOC from '../hooks/useSOC';
+import { useSOC } from '../hooks/useSOC';
 
 const ThreatIntelligence = ({ onUnauth }) => {
   const [intel, setIntel] = useState([]);
