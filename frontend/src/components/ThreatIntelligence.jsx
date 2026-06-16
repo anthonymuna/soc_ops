@@ -71,6 +71,7 @@ const ThreatIntelligence = ({ onUnauth }) => {
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="font-mono text-soc-accent text-lg">{item.ip}</div>
+                    <div className="text-xs text-slate-300 mt-0.5">{item.location || 'Unknown Location'}</div>
                     <div className="text-xs text-slate-400 mt-1">Events: {item.count}</div>
                   </div>
                   <div className={`px-2 py-1 text-xs font-bold uppercase rounded border ${getThreatColor(item.threat_level)}`}>

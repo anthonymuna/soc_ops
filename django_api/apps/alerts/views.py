@@ -203,6 +203,8 @@ class PredictiveAnalysisView(APIView):
 class ThreatIntelligenceView(APIView):
     def get(self, request):
         import json
+        import geoip2.webservice
+        import geoip2.errors
         from datetime import datetime, timezone, timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         
@@ -242,11 +244,34 @@ class ThreatIntelligenceView(APIView):
         if not ip_data:
             return Response({"intelligence": []})
 
+        import os
+        account_id = int(os.environ.get('MAXMIND_ACCOUNT_ID', '1363804'))
+        license_key = os.environ.get('MAXMIND_LICENSE_KEY', '')
+        
+        # Initialize GeoLite Client
+        geo_client = geoip2.webservice.Client(account_id, license_key, host='geolite.info')
+
         prompt_lines = ["Assess the threat level for these source IPs. Return a JSON array ONLY.\n"]
         for ip, d in ip_data.items():
+            location = "Unknown Location"
+            try:
+                response = geo_client.city(ip)
+                city = response.city.name
+                country = response.country.name
+                if city and country:
+                    location = f"{city}, {country}"
+                elif country:
+                    location = country
+            except geoip2.errors.GeoIP2Error:
+                pass
+            except Exception:
+                pass
+                
+            d['location'] = location
+
             classes = list(d["attack_classes"])
             mitre = list(d["mitre_techniques"])
-            prompt_lines.append(f"IP: {ip} | count: {d['count']} | attack_classes: {classes} | MITRE: {mitre}")
+            prompt_lines.append(f"IP: {ip} | location: {location} | count: {d['count']} | attack_classes: {classes} | MITRE: {mitre}")
 
         prompt = "\n".join(prompt_lines)
         
@@ -255,7 +280,7 @@ class ThreatIntelligenceView(APIView):
             "threat level (low/medium/high/critical), likely attacker type "
             "(opportunistic/targeted/APT), and recommended defensive action. "
             "MITRE techniques observed are listed. Reply as JSON array ONLY: "
-            "[{'ip':'...', 'count':..., 'threat_level':'...', 'attacker_type':'...', "
+            "[{'ip':'...', 'location':'...', 'count':..., 'threat_level':'...', 'attacker_type':'...', "
             "'mitre_techniques':[...], 'recommendation':'...'}]"
         )
 
