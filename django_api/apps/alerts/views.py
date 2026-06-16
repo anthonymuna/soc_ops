@@ -192,7 +192,7 @@ class PredictiveAnalysisView(APIView):
                 data = res.json()
                 analysis = data['choices'][0]['message']['content']
         except Exception as e:
-            return Response({"error": f"Failed to reach Qwen AI: {str(e)}"}, status=500)
+            return Response({"analysis": f"**System Error**: Failed to reach Qwen AI endpoint (`10.101.7.72`).\n\n**Details:**\n`{str(e)}`"})
             
         return Response({"analysis": analysis})
 
@@ -287,4 +287,4 @@ class ThreatIntelligenceView(APIView):
                 intelligence_array = json.loads(content.strip())
                 return Response({"intelligence": intelligence_array})
         except Exception as e:
-            return Response({"error": f"Failed to fetch threat intelligence: {str(e)}"}, status=500)
+            return Response({"intelligence": [{"ip": "ERROR", "count": 0, "threat_level": "Critical", "attacker_type": "System Error", "mitre_techniques": ["Network Failure"], "recommendation": f"Failed to reach Qwen AI endpoint (10.101.7.72). Details: {str(e)}"}]})
