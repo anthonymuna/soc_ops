@@ -191,6 +191,9 @@ class PredictiveAnalysisView(APIView):
                 res.raise_for_status()
                 data = res.json()
                 analysis = data['choices'][0]['message']['content']
+        except httpx.HTTPStatusError as e:
+            err_text = e.response.text
+            return Response({"analysis": f"**API Validation Error**: Qwen rejected the payload.\n\n**Details:**\n`{err_text}`"})
         except Exception as e:
             return Response({"analysis": f"**System Error**: Failed to reach Qwen AI endpoint (`10.101.7.72`).\n\n**Details:**\n`{str(e)}`"})
             
