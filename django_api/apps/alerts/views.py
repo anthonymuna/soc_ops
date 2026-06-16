@@ -195,3 +195,96 @@ class PredictiveAnalysisView(APIView):
             return Response({"error": f"Failed to reach Qwen AI: {str(e)}"}, status=500)
             
         return Response({"analysis": analysis})
+
+
+class ThreatIntelligenceView(APIView):
+    def get(self, request):
+        import json
+        from datetime import datetime, timezone, timedelta
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        
+        try:
+            resp = es.search(
+                index="syndicate4-ml-alerts",
+                body={
+                    "query": {"range": {"ml_detected_at": {"gte": since}}},
+                    "size": 100,
+                    "sort": [{"ml_detected_at": {"order": "desc"}}],
+                },
+            )
+            alerts = [h["_source"] for h in resp["hits"]["hits"]]
+        except NotFoundError:
+            alerts = []
+
+        if not alerts:
+            return Response({"intelligence": []})
+
+        # Group by IP
+        ip_data = {}
+        for a in alerts:
+            src = a.get('src_ip')
+            if not src or src in ("unknown", "0.0.0.0", ""):
+                continue
+            if src not in ip_data:
+                ip_data[src] = {"count": 0, "attack_classes": set(), "mitre_techniques": set()}
+            ip_data[src]["count"] += 1
+            ac = a.get("ml_rf_class")
+            if ac:
+                ip_data[src]["attack_classes"].add(ac)
+            mitre = a.get("mitre_techniques", [])
+            if isinstance(mitre, list):
+                for m in mitre:
+                    ip_data[src]["mitre_techniques"].add(m)
+
+        if not ip_data:
+            return Response({"intelligence": []})
+
+        prompt_lines = ["Assess the threat level for these source IPs. Return a JSON array ONLY.\n"]
+        for ip, d in ip_data.items():
+            classes = list(d["attack_classes"])
+            mitre = list(d["mitre_techniques"])
+            prompt_lines.append(f"IP: {ip} | count: {d['count']} | attack_classes: {classes} | MITRE: {mitre}")
+
+        prompt = "\n".join(prompt_lines)
+        
+        system_prompt = (
+            "For each of these source IPs and their attack patterns, assess their "
+            "threat level (low/medium/high/critical), likely attacker type "
+            "(opportunistic/targeted/APT), and recommended defensive action. "
+            "MITRE techniques observed are listed. Reply as JSON array ONLY: "
+            "[{'ip':'...', 'count':..., 'threat_level':'...', 'attacker_type':'...', "
+            "'mitre_techniques':[...], 'recommendation':'...'}]"
+        )
+
+        payload = {
+            "model": "Qwen/Qwen2.5-3B-Instruct",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 2000
+        }
+        
+        try:
+            with httpx.Client(verify=False) as client:
+                res = client.post(
+                    "https://10.101.7.72/v1/chat/completions",
+                    headers={"Authorization": "Bearer 57be7935b6f361750802cd937f3252d21ce14eab9b8acfcf9a40e53e7cf13486"},
+                    json=payload,
+                    timeout=45
+                )
+                res.raise_for_status()
+                data = res.json()
+                content = data['choices'][0]['message']['content'].strip()
+                
+                if content.startswith("```json"):
+                    content = content[7:]
+                elif content.startswith("```"):
+                    content = content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                    
+                intelligence_array = json.loads(content.strip())
+                return Response({"intelligence": intelligence_array})
+        except Exception as e:
+            return Response({"error": f"Failed to fetch threat intelligence: {str(e)}"}, status=500)

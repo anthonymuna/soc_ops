@@ -47,6 +47,18 @@ function AlertDetail({ alert }) {
 
   return (
     <div className="mt-2 space-y-2 text-[10px]">
+      {/* AI Analysis */}
+      {alert.ml_explanation && (
+        <div className="mt-2 mb-3 border-l-2 border-cyan-500 pl-3 bg-cyan-500/5 rounded-r py-2">
+          <div className="text-cyan-500 font-semibold text-[10px] uppercase tracking-wider mb-1">
+            AI Analysis
+          </div>
+          <p className="text-slate-300 text-xs italic leading-relaxed">
+            {alert.ml_explanation}
+          </p>
+        </div>
+      )}
+
       {/* ML scores */}
       <div>
         <div className="text-cyan-500 font-semibold mb-1 uppercase tracking-wider">ML Scores</div>
@@ -95,13 +107,6 @@ function AlertDetail({ alert }) {
         </div>
       )}
 
-      {/* Explanation */}
-      {alert.ml_explanation && (
-        <div className="bg-slate-900/50 dark:bg-black/30 rounded p-2 text-slate-400 leading-relaxed flex gap-2">
-          <Info className="w-3.5 h-3.5 text-cyan-500 shrink-0 mt-0.5" />
-          <span>{alert.ml_explanation}</span>
-        </div>
-      )}
     </div>
   )
 }

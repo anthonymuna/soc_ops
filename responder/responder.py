@@ -6,6 +6,7 @@ DRY_RUN=true logs would-be blocks without calling pfSense — default for POC.
 
 import ipaddress
 import logging
+import json
 import os
 import threading
 import time
@@ -154,6 +155,60 @@ def _fetch_new_alerts() -> list[dict]:
         return []
 
 
+def _qwen_should_block(alert: dict) -> bool:
+    try:
+        url = "https://10.101.7.72/v1/chat/completions"
+        headers = {
+            "Authorization": "Bearer 57be7935b6f361750802cd937f3252d21ce14eab9b8acfcf9a40e53e7cf13486"
+        }
+        
+        system_prompt = (
+            "You are an automated response gate. Decide whether to block this IP. "
+            "Return ONLY valid JSON in the format: {\"block\": true/false, \"reason\": \"...\"}"
+        )
+        
+        prompt_data = {
+            "src_ip": alert.get("src_ip"),
+            "attack_class": alert.get("ml_rf_class"),
+            "severity": alert.get("ml_severity"),
+            "ml_explanation": alert.get("ml_explanation"),
+            "detection_method": alert.get("detection_method"),
+            "ml_if_score": alert.get("ml_if_score")
+        }
+        
+        payload = {
+            "model": "Qwen/Qwen2.5-3B-Instruct",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(prompt_data)}
+            ],
+            "max_tokens": 100
+        }
+        
+        resp = requests.post(url, headers=headers, json=payload, verify=False, timeout=8)
+        resp.raise_for_status()
+        
+        content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        
+        if content.startswith("```json"):
+            content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+            
+        data = json.loads(content.strip())
+        block_decision = bool(data.get("block", True))
+        reason = data.get("reason", "No reason provided")
+        
+        logger.info(f"Qwen decision for {alert.get('src_ip')}: block={block_decision}, reason={reason}")
+        return block_decision
+        
+    except Exception as e:
+        logger.warning(f"Qwen unreachable or failed parsing, failing open (block=True): {e}")
+        return True
+
+
 def _process_alerts() -> None:
     for alert in _fetch_new_alerts():
         _stats["checked"] += 1
@@ -175,6 +230,10 @@ def _process_alerts() -> None:
         rf_conf = float(alert.get("ml_rf_confidence") or 0)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         reason = f"syndicate4:{severity}:{rf_class}:{rf_conf:.0%}:{ts}"
+
+        if not _qwen_should_block(alert):
+            logger.info(f"Qwen vetoed block action for {ip}")
+            continue
 
         if DRY_RUN:
             logger.info(f"[DRY RUN] Would block {ip} — {reason}")

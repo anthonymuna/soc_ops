@@ -12,6 +12,7 @@ import ModelTestPage from './components/ModelTestPage'
 import ReportGenerator from './components/ReportGenerator'
 import AlertMap from './components/AlertMap'
 import PredictiveAnalysis from './components/PredictiveAnalysis'
+import ThreatIntelligence from './components/ThreatIntelligence'
 const ALL_CARDS = [
   { id: 'stat_logs', label: 'Logs Scanned (Stat)' },
   { id: 'stat_alerts', label: 'ML Alerts (Stat)' },
@@ -319,6 +320,8 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
             <div className="absolute inset-0 flex flex-col">
               {selectedConnector === 'predictive_analysis' ? (
                 <PredictiveAnalysis onUnauth={onUnauth} />
+              ) : selectedConnector === 'threat_intelligence' ? (
+                <ThreatIntelligence onUnauth={onUnauth} />
               ) : (
                 isVisible('alert_feed') && <AlertFeed alerts={alerts} history={history} selectedMitreId={selectedMitreId} filter={alertFilter} onFilterChange={setAlertFilter} />
               )}

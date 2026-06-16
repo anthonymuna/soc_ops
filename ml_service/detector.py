@@ -14,6 +14,8 @@ from pathlib import Path
 import threading
 
 import zlib
+import json
+import httpx
 import numpy as np
 import joblib
 from sklearn.ensemble import IsolationForest, RandomForestClassifier, HistGradientBoostingClassifier
@@ -356,33 +358,30 @@ def _extract_labeled_logs(logs: list[dict]) -> tuple[np.ndarray, list[str]] | No
     return np.array(X_rows, dtype=np.float32), y_rows
 
 
-class ZeroShotClassifier:
+class QwenClassifier:
     """
-    HuggingFace zero-shot NLI classifier.
-    Uses cross-encoder/nli-MiniLM2-L6-H768 — fast CPU inference, no GPU needed.
-    Downloads model on first use (~120MB).
+    Qwen zero-shot NLI classifier replacement.
+    Calls self-hosted Qwen LLM endpoint.
     """
 
-    def __init__(self, model_name: str = HF_MODEL):
-        self.model_name = model_name
-        self._pipe = None
+    def __init__(self):
         self._available = False
         self._load()
 
     def _load(self):
         def _target():
             try:
-                from transformers import pipeline
-                logger.info(f"Loading HuggingFace zero-shot classifier: {self.model_name}")
-                self._pipe = pipeline(
-                    "zero-shot-classification",
-                    model=self.model_name,
-                    device=-1,  # CPU
-                )
-                self._available = True
-                logger.info("Zero-shot classifier ready")
+                logger.info("Pinging Qwen model endpoint...")
+                with httpx.Client(verify=False, timeout=5) as client:
+                    res = client.get("https://10.101.7.72/v1/models")
+                if res.status_code == 200:
+                    self._available = True
+                    logger.info("Qwen classifier ready")
+                else:
+                    logger.warning(f"Qwen classifier unavailable: status {res.status_code}")
+                    self._available = False
             except Exception as e:
-                logger.warning(f"Zero-shot classifier unavailable: {e}. Install: pip install transformers torch")
+                logger.warning(f"Qwen classifier unavailable: {e}")
                 self._available = False
         
         t = threading.Thread(target=_target, daemon=True)
@@ -392,19 +391,121 @@ class ZeroShotClassifier:
         """Returns list of {label, score, rf_class} for each text."""
         if not self._available or not texts:
             return [{"label": "unknown", "score": 0.0, "rf_class": "unknown_anomaly"}] * len(texts)
+        
         results = []
-        for text in texts:
-            try:
-                out = self._pipe(text, ZS_LABELS, multi_label=False)
-                top_label = out["labels"][0]
-                top_score = float(out["scores"][0])
-                rf_class = ZS_LABEL_TO_CLASS.get(top_label, "unknown_anomaly")
-                results.append({"label": top_label, "score": top_score, "rf_class": rf_class})
-            except Exception as e:
-                logger.debug(f"ZS classify error: {e}")
-                results.append({"label": "unknown", "score": 0.0, "rf_class": "unknown_anomaly"})
+        url = "https://10.101.7.72/v1/chat/completions"
+        headers = {
+            "Authorization": "Bearer 57be7935b6f361750802cd937f3252d21ce14eab9b8acfcf9a40e53e7cf13486"
+        }
+        
+        system_prompt = (
+            "You are a network traffic classifier. Classify the provided log text into EXACTLY ONE of these categories: "
+            "normal, dos, probe, r2l, u2r, unknown_anomaly. "
+            "Return ONLY valid JSON in the exact format: "
+            "{\"rf_class\": \"<category>\", \"score\": <confidence 0.0-1.0>, \"label\": \"<brief description>\"}"
+        )
+        
+        with httpx.Client(verify=False, timeout=15) as client:
+            for text in texts:
+                try:
+                    payload = {
+                        "model": "Qwen/Qwen2.5-3B-Instruct",
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": text}
+                        ],
+                        "max_tokens": 200
+                    }
+                    res = client.post(url, headers=headers, json=payload)
+                    res.raise_for_status()
+                    
+                    content = res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    
+                    # Strip markdown fences
+                    if content.startswith("```json"):
+                        content = content[7:]
+                    elif content.startswith("```"):
+                        content = content[3:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+                        
+                    data = json.loads(content.strip())
+                    rf_class = data.get("rf_class", "unknown_anomaly")
+                    if rf_class not in ["normal", "dos", "probe", "r2l", "u2r", "unknown_anomaly"]:
+                        rf_class = "unknown_anomaly"
+                        
+                    results.append({
+                        "label": data.get("label", "unknown"),
+                        "score": float(data.get("score", 0.0)),
+                        "rf_class": rf_class
+                    })
+                except Exception as e:
+                    logger.debug(f"Qwen classify error: {e}")
+                    results.append({"label": "unknown", "score": 0.0, "rf_class": "unknown_anomaly"})
+                    
         return results
 
+    @property
+    def available(self):
+        return self._available
+
+
+class QwenNarrator:
+    """Replaces _explain() string concatenation with analyst-grade summaries."""
+
+    def __init__(self):
+        self._available = False
+        self._load()
+        
+    def _load(self):
+        def _target():
+            try:
+                with httpx.Client(verify=False, timeout=5) as client:
+                    res = client.get("https://10.101.7.72/v1/models")
+                if res.status_code == 200:
+                    self._available = True
+                else:
+                    self._available = False
+            except Exception:
+                self._available = False
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+
+    def narrate(self, alert: dict) -> str:
+        """Generates 2-3 sentence analyst summary."""
+        if not self._available:
+            return ""
+            
+        url = "https://10.101.7.72/v1/chat/completions"
+        headers = {
+            "Authorization": "Bearer 57be7935b6f361750802cd937f3252d21ce14eab9b8acfcf9a40e53e7cf13486"
+        }
+        
+        system_prompt = (
+            "You are a SOC analyst. Write a concise 2-3 sentence threat summary based on the provided alert JSON. "
+            "Cover: 1. What happened (attack type, src_ip -> dst_ip, port). "
+            "2. Why it is suspicious (detection layers, confidence). "
+            "3. Recommended immediate action. "
+            "No markdown, no bullet points, plain text only."
+        )
+        
+        try:
+            with httpx.Client(verify=False, timeout=10) as client:
+                payload = {
+                    "model": "Qwen/Qwen2.5-3B-Instruct",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": json.dumps(alert)}
+                    ],
+                    "max_tokens": 300
+                }
+                res = client.post(url, headers=headers, json=payload)
+                res.raise_for_status()
+                return res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        except Exception as e:
+            logger.debug(f"Qwen narrate error: {e}")
+            return ""
+            
     @property
     def available(self):
         return self._available
@@ -421,7 +522,9 @@ class AnomalyDetector:
         self.training_samples: int = 0
         self.nsl_kdd_trained: bool = False
         self.live_supervised: bool = False
-        self.zs_classifier = ZeroShotClassifier() if USE_ZS_CLASSIFIER else None
+        self.live_supervised: bool = False
+        self.zs_classifier = QwenClassifier() if USE_ZS_CLASSIFIER else None
+        self.narrator = QwenNarrator()
         self._load()
 
     def _load(self):
@@ -693,7 +796,14 @@ class AnomalyDetector:
                     "ml_src_geo": _get_geo(log.get("src_ip", "")),
                     "ml_dst_geo": _get_geo(log.get("dst_ip", "")),
                     "detection_method": "ml",
-                })
+                }
+                
+                if self.narrator.available:
+                    narrative = self.narrator.narrate(result_dict)
+                    if narrative:
+                        result_dict["ml_explanation"] = narrative
+                        
+                results.append(result_dict)
 
         return results
 
