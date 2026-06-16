@@ -33,13 +33,6 @@ export default function ModelStatus({ health }) {
           tagColor="purple"
         />
         <ModelRow
-          label="Zero-Shot NLI — HuggingFace"
-          desc="cross-encoder/nli-MiniLM2-L6-H768 · no fine-tuning"
-          active={health.zs_classifier_ready}
-          tag="PRETRAINED"
-          tagColor="amber"
-        />
-        <ModelRow
           label="IsolationForest"
           desc="Unsupervised fallback — baseline anomaly detection"
           active={health.model_trained}

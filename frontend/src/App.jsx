@@ -275,10 +275,9 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
               label="Model"
               value={health?.model_trained ? 'ACTIVE' : 'TRAINING'}
               sub={
-                health?.zs_classifier_ready ? 'RF + GB + ZeroShot + IF' :
-                  health?.live_supervised ? 'RF + GB + IF' :
-                    health?.nsl_kdd_trained ? 'RF + IF' :
-                      'IsolationForest'
+                health?.live_supervised ? 'Qwen + RF + GB + IF' :
+                  health?.nsl_kdd_trained ? 'Qwen + RF + IF' :
+                    'Qwen + IsolationForest'
               }
               color={health?.model_trained ? 'soc-green' : 'soc-yellow'}
               icon={<Cpu className="w-4 h-4" />}
