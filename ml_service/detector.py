@@ -152,6 +152,8 @@ def _get_geo(ip: str) -> str:
 
 
 def _is_external(ip: str) -> int:
+    if not ip or ip in ("null", "None"):
+        return 0
     s = str(ip)
     return 0 if any(s.startswith(p) for p in PRIVATE_PREFIXES) else 1
 
@@ -774,7 +776,7 @@ class AnomalyDetector:
 
                 severity = _determine_severity(final_class, final_conf, if_score, is_if_anomaly)
                 explanation = _explain(
-                    X[i], if_score, label_class, label_conf,
+                    log, X[i], if_score, label_class, label_conf,
                     live_class, live_conf, zs_label, zs_score,
                     is_if_anomaly, is_label_attack, is_live_attack, is_zs_attack,
                 )
@@ -869,24 +871,30 @@ def _determine_severity(rf_class: str, rf_conf: float, if_score: float, is_if: b
     return "low"
 
 
-def _explain(X, if_score, label_class, _label_conf,
+def _explain(log, X, if_score, label_class, _label_conf,
              live_class, live_conf, zs_label, zs_score,
              is_if, is_label, is_live, is_zs) -> str:
     parts = []
+    
+    desc = log.get("wazuh_description") or log.get("rule", {}).get("description") or log.get("event_type")
+    if desc:
+        parts.append(f"Event: {desc}")
+        
     if is_label:
-        parts.append(f"Label inference: [{label_class.upper()}] (threat_category/event_type field)")
+        parts.append(f"Rule match: {label_class.upper()}")
     if is_live:
-        parts.append(f"Live GB: [{live_class.upper()}] conf={live_conf:.0%}")
+        parts.append(f"ML Classifier: {live_class.upper()} ({live_conf:.0%} conf)")
     if is_zs:
-        parts.append(f"Zero-shot NLI: \"{zs_label}\" score={zs_score:.0%}")
+        parts.append(f"AI match: \"{zs_label}\" ({zs_score:.0%})")
     if is_if:
-        parts.append(f"IsolationForest score={if_score:.3f}")
+        parts.append(f"Anomaly score: {if_score:.3f}")
         bytes_val = X[FEATURE_NAMES.index("bytes")]
         if bytes_val > 100000:
-            parts.append(f"large transfer={bytes_val/1024:.0f}KB")
+            parts.append(f"Large transfer ({bytes_val/1024:.0f}KB)")
         if X[FEATURE_NAMES.index("is_external_dst")]:
-            parts.append("external destination")
-    return "; ".join(parts) if parts else "Anomaly detected"
+            parts.append("Destination is external")
+            
+    return " | ".join(parts) if parts else "Anomaly detected"
 
 
 def _synthetic_normal(n: int) -> np.ndarray:

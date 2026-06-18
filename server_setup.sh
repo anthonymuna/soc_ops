@@ -34,6 +34,18 @@ sysctl -w vm.max_map_count=262144
 grep -q "vm.max_map_count" /etc/sysctl.conf \
   || echo "vm.max_map_count=262144" >> /etc/sysctl.conf
 
+# --- Configure Swap Space (Prevent OOM) ---
+if [ ! -f /swapfile ]; then
+  echo "Creating 8GB swapfile to prevent Out-Of-Memory errors..."
+  fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+else
+  echo "Swapfile already exists."
+fi
+
 # --- Create deploy dir ---
 mkdir -p "$DEPLOY_DIR"
 
@@ -162,6 +174,12 @@ curl -sf -X POST "http://localhost:5601/api/data_views/data_view" \
       "timeFieldName": "ml_detected_at"
     }
   }' && echo "Kibana alerts data view created"
+
+# --- Auto-delete docker logs every 24 hours ---
+echo '#!/bin/sh' > /etc/cron.daily/docker-log-truncate
+echo '/usr/bin/truncate -s 0 /var/lib/docker/containers/*/*-json.log 2>/dev/null || true' >> /etc/cron.daily/docker-log-truncate
+chmod +x /etc/cron.daily/docker-log-truncate
+echo "Docker log truncation cron installed"
 
 # --- systemd service for auto-start on reboot ---
 cat > /etc/systemd/system/syndicate4.service << 'EOF'

@@ -263,11 +263,11 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId, filte
     })
   }
 
-  // Deduplicate alerts with same source IP, destination IP, and event type/description
+  // Deduplicate alerts with same agent, source IP, destination IP, and event type/description
   const dedupMap = new Map();
   const dedupedFiltered = [];
   for (const a of filtered) {
-    const key = [a.src_ip, a.dst_ip, a.event_type, a.wazuh_description || a.mitre_technique || ''].join('|');
+    const key = [a.agent_name || 'unknown', a.src_ip, a.dst_ip, a.event_type, a.wazuh_description || a.mitre_technique || ''].join('|');
     if (dedupMap.has(key)) {
       dedupMap.get(key)._count += 1;
     } else {

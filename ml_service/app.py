@@ -185,7 +185,7 @@ def run_scan():
             return
         alerts = detector.predict(logs)
         if alerts:
-            filtered_alerts = [a for a in alerts if a.get("src_ip") not in WHITELISTED_IPS and a.get("dst_ip") not in WHITELISTED_IPS]
+            filtered_alerts = [a for a in alerts if not ((a.get("src_ip") in WHITELISTED_IPS or a.get("dst_ip") in WHITELISTED_IPS) and a.get("ml_severity") not in ("critical", "high"))]
             
             stats["anomalies_detected"] += len(filtered_alerts)
             _write_alerts(filtered_alerts)
@@ -249,7 +249,7 @@ def _kafka_consumer_thread():
                 if detector.is_trained():
                     alerts = detector.predict(buffer)
                     if alerts:
-                        filtered_alerts = [a for a in alerts if a.get("src_ip") not in WHITELISTED_IPS and a.get("dst_ip") not in WHITELISTED_IPS]
+                        filtered_alerts = [a for a in alerts if not ((a.get("src_ip") in WHITELISTED_IPS or a.get("dst_ip") in WHITELISTED_IPS) and a.get("ml_severity") not in ("critical", "high"))]
                         
                         stats["anomalies_detected"] += len(filtered_alerts)
                         _write_alerts(filtered_alerts)
@@ -427,7 +427,7 @@ def scan_live(req: ScanLiveRequest):
             
         alerts = detector.predict(req.logs)
         if alerts:
-            filtered_alerts = [a for a in alerts if a.get("src_ip") not in WHITELISTED_IPS and a.get("dst_ip") not in WHITELISTED_IPS]
+            filtered_alerts = [a for a in alerts if not ((a.get("src_ip") in WHITELISTED_IPS or a.get("dst_ip") in WHITELISTED_IPS) and a.get("ml_severity") not in ("critical", "high"))]
             
             stats["anomalies_detected"] += len(filtered_alerts)
             _write_alerts(filtered_alerts)

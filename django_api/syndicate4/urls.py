@@ -14,7 +14,7 @@ def admin_login_denied(request):
 
 def custom_admin_logout(request):
     logout(request)
-    frontend_url = os.getenv("FRONTEND_URL", "http://10.104.4.68:3000")
+    frontend_url = os.getenv("FRONTEND_URL", "http://10.104.4.68")
     return redirect(frontend_url)
 
 urlpatterns = [
