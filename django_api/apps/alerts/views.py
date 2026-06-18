@@ -14,11 +14,22 @@ class AlertsListView(APIView):
         limit = int(request.GET.get('limit', 50))
         minutes = int(request.GET.get('minutes', 60))
         connector = request.GET.get('connector')
+        timeframe = request.GET.get('timeframe', 'live')
         
         from datetime import datetime, timezone, timedelta
-        since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+        now = datetime.now(timezone.utc)
         
-        must_clauses = [{"range": {"ml_detected_at": {"gte": since}}}]
+        must_clauses = []
+        if timeframe == 'yesterday':
+            start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_yesterday = start_of_yesterday.replace(hour=23, minute=59, second=59)
+            must_clauses.append({"range": {"ml_detected_at": {"gte": start_of_yesterday.isoformat(), "lte": end_of_yesterday.isoformat()}}})
+        elif timeframe == 'today':
+            start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            must_clauses.append({"range": {"ml_detected_at": {"gte": start_of_today.isoformat()}}})
+        else:
+            since = (now - timedelta(minutes=minutes)).isoformat()
+            must_clauses.append({"range": {"ml_detected_at": {"gte": since}}})
         if connector:
             must_clauses.append({"term": {"connector.keyword": connector}})
 

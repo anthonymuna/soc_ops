@@ -55,7 +55,8 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
   const [selectedMitreId, setSelectedMitreId] = useState(null)
   const [selectedConnector, setSelectedConnector] = useState('wazuh')
   const [showConnectorMenu, setShowConnectorMenu] = useState(false)
-  const { health, stats, alerts, history, error, lastTick, refresh } = useSOC(10000, onUnauth, selectedConnector)
+  const [timeframe, setTimeframe] = useState('live')
+  const { health, stats, alerts, history, error, lastTick, refresh } = useSOC(10000, onUnauth, selectedConnector, timeframe)
   
   const [user, setUser] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -142,6 +143,24 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
             </div>
             <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 object-contain rounded bg-white/5" />
             <span className="font-bold text-cyan-400 tracking-widest text-sm hidden sm:inline">NGAO SOC</span>
+            
+            {/* Timeframe Selector */}
+            <div className="hidden md:flex items-center ml-4 bg-soc-panel rounded border border-soc-border p-0.5">
+              {['live', 'today', 'yesterday'].map(tf => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-all ${
+                    timeframe === tf 
+                      ? 'bg-cyan-500/20 text-cyan-300 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
+
             <span className="text-slate-600 text-xs hidden lg:inline">AI-BASED CYBER THREAT DETECTION</span>
             <div className="hidden sm:flex items-center gap-1 ml-2">
               {[
@@ -299,7 +318,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           
           {/* Left panel: MITRE Heatmap & System Status */}
           <div className="lg:col-span-1 space-y-4 flex flex-col">
-            {isVisible('heatmap') && <MitreHeatmap history={history} selectedMitreId={selectedMitreId} onSelectMitreId={setSelectedMitreId} />}
+            {isVisible('heatmap') && <MitreHeatmap history={alerts} selectedMitreId={selectedMitreId} onSelectMitreId={setSelectedMitreId} />}
 
             {/* Scan errors / quick stats */}
             <div className="bg-soc-panel border border-soc-border rounded-lg p-4 space-y-2">

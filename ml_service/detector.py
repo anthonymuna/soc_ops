@@ -800,6 +800,27 @@ class AnomalyDetector:
                     "detection_method": "ml",
                 }
                 
+                # Add MITRE techniques
+                mitre_list = []
+                evt = str(log.get("event_type", "")).lower()
+                fallback_map = {
+                    "port_scan": "T1046", "brute_force": "T1110", "lateral_movement": "T1021.002",
+                    "data_exfil": "T1041", "c2_beacon": "T1071", "recon": "T1018",
+                    "dos": "T1498"
+                }
+                if evt in fallback_map:
+                    mitre_list.append(fallback_map[evt])
+                elif final_class == "dos":
+                    mitre_list.append("T1498")
+                elif final_class == "probe":
+                    mitre_list.append("T1046")
+                elif final_class == "r2l":
+                    mitre_list.append("T1110")
+                elif final_class == "u2r":
+                    mitre_list.append("T1068")
+                
+                result_dict["mitre_techniques"] = mitre_list
+                
                 if self.narrator.available:
                     narrative = self.narrator.narrate(result_dict)
                     if narrative:

@@ -355,13 +355,29 @@ def get_stats(connector: str = None, _token: str = Depends(_verify_token)):
 
 
 @app.get("/alerts")
-def get_alerts(limit: int = 50, minutes: int = 60, _token: str = Depends(_verify_token)):
-    since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+def get_alerts(limit: int = 50, minutes: int = 60, timeframe: str = "live", connector: str = None, _token: str = Depends(_verify_token)):
+    now = datetime.now(timezone.utc)
+    
+    if timeframe == 'yesterday':
+        start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_yesterday = start_of_yesterday.replace(hour=23, minute=59, second=59)
+        query_range = {"gte": start_of_yesterday.isoformat(), "lte": end_of_yesterday.isoformat()}
+    elif timeframe == 'today':
+        start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        query_range = {"gte": start_of_today.isoformat()}
+    else:
+        since = (now - timedelta(minutes=minutes)).isoformat()
+        query_range = {"gte": since}
+        
+    must_clauses = [{"range": {"ml_detected_at": query_range}}]
+    if connector:
+        must_clauses.append({"term": {"connector.keyword": connector}})
+        
     try:
         resp = es.search(
             index=ALERT_INDEX,
             body={
-                "query": {"range": {"ml_detected_at": {"gte": since}}},
+                "query": {"bool": {"must": must_clauses}},
                 "size": limit,
                 "sort": [{"ml_detected_at": {"order": "desc"}}],
             },

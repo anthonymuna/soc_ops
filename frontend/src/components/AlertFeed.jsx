@@ -234,8 +234,8 @@ export default function AlertFeed({ alerts, history = [], selectedMitreId, filte
   const [ipDrawer,  setIpDrawer]  = useState(null)
   const [feedbackSent, setFeedbackSent] = useState({})
 
-  // Use history if a mitre filter is active, since the heatmap counts are based on history
-  const baseArray = selectedMitreId ? history : alerts
+  // Use alerts instead of history to match heatmap counts and the API limit
+  const baseArray = alerts
   let filtered = filter === 'all' ? baseArray : baseArray.filter(a => a.ml_severity === filter)
 
   if (selectedMitreId) {

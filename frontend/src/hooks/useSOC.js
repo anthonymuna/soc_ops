@@ -20,20 +20,28 @@ export async function fetchJson(url, onUnauth) {
   return data
 }
 
-export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
+export function useSOC(refreshMs = 10000, onUnauth, selectedConnector, timeframe = 'live') {
   const [health,   setHealth]   = useState(null)
   const [stats,    setStats]    = useState(null)
   const [alerts,   setAlerts]   = useState([])
   const [history,  setHistory]  = useState([])
   const [error,    setError]    = useState(null)
   const [lastTick, setLastTick] = useState(null)
+  const [prevTimeframe, setPrevTimeframe] = useState(timeframe)
 
   const refresh = useCallback(async () => {
     try {
+      if (timeframe !== prevTimeframe) {
+        setHistory([])
+        setPrevTimeframe(timeframe)
+      }
+
       const qs = selectedConnector ? `?connector=${encodeURIComponent(selectedConnector)}` : ''
-      const alertQs = selectedConnector 
-        ? `?limit=200&minutes=100800&connector=${encodeURIComponent(selectedConnector)}`
-        : `?limit=200&minutes=100800`
+      const limit = (timeframe === 'today' || timeframe === 'yesterday') ? 1000 : 200
+      let alertQs = `?limit=${limit}&minutes=100800&timeframe=${encodeURIComponent(timeframe)}`
+      if (selectedConnector) {
+        alertQs += `&connector=${encodeURIComponent(selectedConnector)}`
+      }
 
       const [h, s, a] = await Promise.allSettled([
         fetchJson(`${ML_API}/health/`, onUnauth),
@@ -46,14 +54,16 @@ export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
         const incoming = a.value.alerts || []
         setAlerts(incoming)
         setHistory(prev => {
-          const combined = [...incoming, ...prev]
+          // If timeframe changed midway, start fresh
+          const currentPrev = timeframe !== prevTimeframe ? [] : prev
+          const combined = [...incoming, ...currentPrev]
           const seen = new Set()
           return combined.filter(x => {
             const key = `${x.ml_detected_at}${x.src_ip}${x.event_type}`
             if (seen.has(key)) return false
             seen.add(key)
             return true
-          }).slice(0, 500)
+          }).slice(0, Math.max(500, limit))
         })
       }
       setError(null)
@@ -61,7 +71,7 @@ export function useSOC(refreshMs = 10000, onUnauth, selectedConnector) {
     } catch (e) {
       setError(e.message)
     }
-  }, [onUnauth, selectedConnector])
+  }, [onUnauth, selectedConnector, timeframe, prevTimeframe])
 
   useEffect(() => {
     refresh()
