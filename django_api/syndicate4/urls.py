@@ -25,5 +25,6 @@ urlpatterns = [
     path('api/alerts/', include('apps.alerts.urls')),
     path('api/reports/', include('apps.reports.urls')),
     path('api/config/', include('apps.config.urls')),
+    path('api/brain/', include('apps.brain.urls')),
     path('api/', include('apps.alerts.proxy_urls')), # stats, health, model, train, scan, logs
 ]

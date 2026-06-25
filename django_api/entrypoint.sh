@@ -14,7 +14,7 @@ echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
 echo "Running migrations..."
-python manage.py makemigrations auth_app alerts reports config
+python manage.py makemigrations auth_app alerts reports config brain
 python manage.py migrate --noinput
 
 echo "Creating superuser..."

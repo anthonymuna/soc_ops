@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'apps.alerts',
     'apps.reports',
     'apps.config',
+    'apps.brain',
 ]
 
 MIDDLEWARE = [
@@ -97,6 +98,7 @@ SIMPLE_JWT = {
 }
 
 ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://ml_service:8000")
+BRAIN_SERVICE_URL = os.getenv("BRAIN_SERVICE_URL", "http://ngao_brain:9000")
 ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
 
 JAZZMIN_SETTINGS = {

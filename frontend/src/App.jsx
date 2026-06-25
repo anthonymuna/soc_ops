@@ -13,6 +13,9 @@ import ReportGenerator from './components/ReportGenerator'
 import AlertMap from './components/AlertMap'
 import PredictiveAnalysis from './components/PredictiveAnalysis'
 import ThreatIntelligence from './components/ThreatIntelligence'
+import TriageQueue from './components/TriageQueue'
+import ChatPanel from './components/ChatPanel'
+
 const ALL_CARDS = [
   { id: 'stat_logs', label: 'Logs Scanned (Stat)' },
   { id: 'stat_alerts', label: 'ML Alerts (Stat)' },
@@ -25,6 +28,7 @@ const ALL_CARDS = [
   { id: 'alert_feed', label: 'Alert Feed' },
   { id: 'alert_map', label: 'Geo Map' },
   { id: 'model_status', label: 'Detailed Model Status' },
+  { id: 'triage_queue', label: 'AI Triage HitL Queue' },
   { id: 'class_breakdown', label: 'Attack Class Breakdown' }
 ]
 
@@ -350,6 +354,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           <div className="lg:col-span-1 space-y-4">
             {isVisible('alert_map') && <AlertMap history={history} />}
             {isVisible('model_status') && <ModelStatus health={health} />}
+            {isVisible('triage_queue') && <TriageQueue onUnauth={onUnauth} />}
           </div>
         </div>
 
@@ -399,6 +404,7 @@ function Dashboard({ onLogout, onUnauth, dark, onToggleTheme }) {
           </div>
         </div>
       )}
+      <ChatPanel onUnauth={onUnauth} />
     </div>
   )
 }

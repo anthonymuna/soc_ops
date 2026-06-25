@@ -17,6 +17,8 @@ import urllib3
 from elasticsearch import Elasticsearch, NotFoundError
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -304,6 +306,60 @@ def get_blocks(limit: int = 50) -> dict:
     }
 
 
+class BlockRequest(BaseModel):
+    ip: str
+    reason: str
+    severity: str | None = None
+
+
+@app.post("/blocks")
+def post_block(req: BlockRequest) -> dict:
+    ip = req.ip.strip()
+    if not ip or ip in ("unknown", "0.0.0.0"):
+        return {"success": False, "message": f"Invalid IP address: '{ip}'"}
+
+    if not _is_blockable(ip):
+        _stats["skipped_allowlist"] += 1
+        logger.info(f"Programmatic block skipped for allowlisted/private IP: {ip}")
+        return {"success": False, "message": f"IP {ip} is in the allowlist/private subnet and cannot be blocked"}
+
+    if ip in _blocked_ips:
+        _stats["skipped_duplicate"] += 1
+        logger.info(f"Programmatic block skipped for already blocked IP: {ip}")
+        return {"success": True, "message": f"IP {ip} is already blocked"}
+
+    # Proceed to block
+    severity = req.severity or "high"
+    reason = req.reason or f"programmatic block at {datetime.now(timezone.utc).isoformat()}"
+    alert_dummy = {
+        "ml_severity": severity,
+        "ml_rf_class": "manual_triage",
+        "ml_rf_confidence": 1.0,
+        "ml_explanation": reason,
+        "src_port": None,
+        "dst_port": None,
+        "event_type": "programmatic_block"
+    }
+
+    if DRY_RUN:
+        logger.info(f"[DRY RUN] Programmatic block would block {ip} — {reason}")
+        _blocked_ips.add(ip)
+        _stats["blocked"] += 1
+        _record_block(ip, alert_dummy, pfsense_ok=False)
+        return {"success": True, "message": f"[DRY RUN] Would block {ip} — {reason}"}
+    else:
+        ok = _call_pfsense(ip, reason)
+        if ok:
+            _blocked_ips.add(ip)
+            _stats["blocked"] += 1
+            _record_block(ip, alert_dummy, pfsense_ok=ok)
+            return {"success": True, "message": f"Blocked {ip} via pfSense"}
+        else:
+            _stats["pfsense_errors"] += 1
+            _record_block(ip, alert_dummy, pfsense_ok=ok)
+            return {"success": False, "message": f"Failed to block {ip} via pfSense"}
+
+
 @app.delete("/blocks/{ip}")
 def unblock_ip(ip: str) -> dict:
     _blocked_ips.discard(ip)
@@ -311,3 +367,4 @@ def unblock_ip(ip: str) -> dict:
         "unblocked": ip,
         "note": "removed from local tracking only — also remove from pfSense alias manually",
     }
+
