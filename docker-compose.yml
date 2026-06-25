@@ -1,0 +1,303 @@
+version: '3.8'
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: syndicate4-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    networks:
+      - syndicate4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.0
+    container_name: syndicate4-kibana
+    ports:
+      - "127.0.0.1:5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=syndicate4encryptionkey32chars!!
+      - TELEMETRY_ENABLED=false
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: syndicate4-postgres
+    environment:
+      - POSTGRES_DB=syndicate4
+      - POSTGRES_USER=syndicate4
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432"
+    networks:
+      - syndicate4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syndicate4"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: syndicate4-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      CLUSTER_ID: LelM2dIFQkiUFvXCEcqRWA
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    volumes:
+      - ./kafka/entrypoint.sh:/entrypoint.sh
+    command: /entrypoint.sh
+    ports:
+      - "127.0.0.1:9092:9092"
+    networks:
+      - syndicate4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  wazuh_connector:
+    build: ./wazuh_connector
+    container_name: syndicate4-wazuh-connector
+    environment:
+      - WAZUH_API_URL=${WAZUH_API_URL:-https://127.0.0.1:55000}
+      - WAZUH_API_USER=${WAZUH_API_USER:-wazuh-wui}
+      - WAZUH_API_PASS=${WAZUH_API_PASS}
+      - WAZUH_JWT_TOKEN=${WAZUH_JWT_TOKEN}
+      - WAZUH_INDEXER_HOST=${WAZUH_INDEXER_HOST:-https://127.0.0.1:9201}
+      - WAZUH_INDEXER_USER=${WAZUH_INDEXER_USER:-admin}
+      - WAZUH_INDEXER_PASS=${WAZUH_INDEXER_PASS}
+      - WAZUH_ALERTS_ENABLED=${WAZUH_ALERTS_ENABLED:-true}
+      - WAZUH_SSH_HOST=${WAZUH_SSH_HOST:-127.0.0.1}
+      - WAZUH_ALERT_SOURCE=indexer
+      - ES_HOST=http://elasticsearch:9200
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    networks:
+      - syndicate4
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  fortisiem_connector:
+    build: ./fortisiem_connector
+    container_name: syndicate4-fortisiem-connector
+    environment:
+      - FORTISIEM_URL=${FORTISIEM_URL}
+      - FORTISIEM_USER=${FORTISIEM_USER}
+      - FORTISIEM_PASS=${FORTISIEM_PASS}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    networks:
+      - syndicate4
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  umbrella_connector:
+    build: ./umbrella_connector
+    container_name: syndicate4-umbrella-connector
+    environment:
+      - UMBRELLA_CLIENT_ID=${UMBRELLA_CLIENT_ID}
+      - UMBRELLA_CLIENT_SECRET=${UMBRELLA_CLIENT_SECRET}
+      - UMBRELLA_ORG_ID=${UMBRELLA_ORG_ID}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    networks:
+      - syndicate4
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ml_service:
+    build: ./ml_service
+    container_name: syndicate4-ml
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - ES_HOST=http://elasticsearch:9200
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_ENABLED=true
+      - TRAIN_INTERVAL_SECONDS=300
+      - SCAN_INTERVAL_SECONDS=15
+      - CONTAMINATION=${CONTAMINATION:-0.05}
+      - AUTH_USERNAME=${AUTH_USERNAME:-admin}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-admin}
+      - NOTIFY_WEBHOOK_URL=${NOTIFY_WEBHOOK_URL:-}
+      - WHITELISTED_IPS=${WHITELISTED_IPS:-127.0.0.1}
+      - QWEN_API_URL=${QWEN_API_URL:-https://127.0.0.1/v1}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - mlmodels:/app/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  django_api:
+    build: ./django_api
+    container_name: syndicate4-django
+    ports:
+      - "127.0.0.1:8088:8080"
+    environment:
+      - DATABASE_URL=postgres://syndicate4:${POSTGRES_PASSWORD}@postgres:5432/syndicate4
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=*
+      - ML_SERVICE_URL=http://ml_service:8000
+      - ES_HOST=http://elasticsearch:9200
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME}
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
+      - QWEN_API_URL=${QWEN_API_URL:-https://127.0.0.1/v1}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+    networks:
+      - syndicate4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml_service:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+  responder:
+    build: ./responder
+    container_name: syndicate4-responder
+    ports:
+      - "127.0.0.1:8001:8001"
+    extra_hosts:
+      - "host-gateway:host-gateway"
+    environment:
+      - ES_HOST=http://elasticsearch:9200
+      - PFSENSE_URL=${PFSENSE_URL:-http://host-gateway:8080}
+      - PFSENSE_API_KEY=${PFSENSE_API_KEY:-}
+      - PFSENSE_ALIAS=syndicate4_blocklist
+      - BLOCK_SEVERITIES=critical,high
+      - NEVER_BLOCK=${NEVER_BLOCK:-127.0.0.1}
+      - QWEN_API_URL=${QWEN_API_URL:-https://127.0.0.1/v1}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+      - POLL_INTERVAL=10
+      - DRY_RUN=${DRY_RUN:-true}
+    networks:
+      - syndicate4
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health',timeout=3).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: build
+    container_name: syndicate4-frontend
+    ports:
+      - "127.0.0.1:80:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    networks:
+      - syndicate4
+    depends_on:
+      - django_api
+    restart: unless-stopped
+
+networks:
+  syndicate4:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1450
+
+volumes:
+  esdata:
+    driver: local
+  mlmodels:
+    driver: local
+  pgdata:
+    driver: local

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -i /Users/emmanuel/Documents/Ghost_chat/syndicate4/keys/syndicate4.pem -o StrictHostKeyChecking=no ubuntu@10.104.4.68 'sudo docker exec syndicate4-ml env | grep AUTH')"
+    ]
+  }
+}
