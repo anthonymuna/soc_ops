@@ -70,7 +70,7 @@ Defensive SOC system that detects network intrusions using machine learning, sim
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    SOC DASHBOARD (React)                     │
-│                  http://10.104.4.68:3000                     │
+│                               │
 │                                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
 │  │ Logs     │ │ ML       │ │ Critical │ │ Session  │       │
@@ -100,10 +100,10 @@ Defensive SOC system that detects network intrusions using machine learning, sim
 
 | Container | Port | Role |
 |---|---|---|
-| `syndicate4-es` | 9200 | Elasticsearch — stores all logs and alerts |
-| `syndicate4-logstash` | 5000/udp, 5044 | Ingests and enriches logs |
-| `syndicate4-kibana` | 5601 | Raw data exploration (analysts) |
-| `syndicate4-ml` | 8000 | AI detection engine + REST API |
+| `syndicate4-es` | Elasticsearch — stores all logs and alerts |
+| `syndicate4-logstash` | 50/udp, 50 | Ingests and enriches logs |
+| `syndicate4-kibana` |  | Raw data exploration (analysts) |
+| `syndicate4-ml` |  | AI detection engine + REST API |
 | `syndicate4-atomic` | — | Atomic Red Team attack simulator |
 | `syndicate4-simulator` | — | Continuous network traffic generator |
 | `syndicate4-filebeat` | — | Ships host OS logs |
@@ -133,7 +133,7 @@ Defensive SOC system that detects network intrusions using machine learning, sim
 
 ## ML API
 
-Base URL: `http://10.104.4.68:8000`
+
 
 | Endpoint | Description |
 |---|---|
@@ -170,17 +170,16 @@ cd syndicate4/
 ./deploy.sh --status
 
 # Open dashboard
-open http://10.104.4.68:3000
+open 
 
 # Trigger manual model retrain
-curl -X POST http://10.104.4.68:8000/train
+curl -X POST http
 
 # Watch live alerts
-curl http://10.104.4.68:8000/alerts?limit=10 | python3 -m json.tool
+curl http:// | python3 -m json.tool
 
 # SSH to server
-ssh -i keys/syndicate4.pem ubuntu@10.104.4.68
-
+ssh -i keys/
 # On server — restart all containers
 cd /opt/syndicate4 && sudo docker compose up -d
 ```
