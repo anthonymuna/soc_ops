@@ -15,13 +15,15 @@ import ChatPanel from './components/ChatPanel'
 import ThreatIntelligence from './components/ThreatIntelligence'
 import ThreatHunting from './components/ThreatHunting'
 import PredictiveAnalysis from './components/PredictiveAnalysis'
+import ReportGenerator from './components/ReportGenerator'
+import SettingsView from './components/Settings'
 
 const CONNECTORS = [
   { id: 'wazuh', label: 'Wazuh' },
-  { id: 'fortisiem', label: 'FortiSIEM' },
-  { id: 'umbrella', label: 'Cisco Umbrella' },
-  { id: 'predictive_analysis', label: 'Predictive Analysis' },
-  { id: 'threat_intelligence', label: 'Threat Intel' }
+  // { id: 'fortisiem', label: 'FortiSIEM' },
+  // { id: 'umbrella', label: 'Cisco Umbrella' },
+  // { id: 'predictive_analysis', label: 'Predictive Analysis' },
+  // { id: 'threat_intelligence', label: 'Threat Intel' }
 ];
 
 export default function App() {
@@ -29,8 +31,13 @@ export default function App() {
   const [dark, setDark] = useState(true)
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
-  }, [dark])
+    const theme = localStorage.getItem('theme');
+    if (theme === 'light') {
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+    }
+  }, [])
 
   const handleLogout = useCallback(async () => {
     await logout()
@@ -38,6 +45,38 @@ export default function App() {
   }, [])
   
   const handleUnauth = useCallback(() => setAuthed(false), [])
+
+  // Auto-logout due to inactivity (15 minutes)
+  useEffect(() => {
+    if (!authed) return;
+
+    let timeoutId;
+    const INACTIVITY_LIMIT = 15 * 60 * 1000; // 15 minutes
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        handleLogout();
+        alert("You have been automatically signed out due to inactivity for security purposes.");
+      }, INACTIVITY_LIMIT);
+    };
+
+    // Initialize timer
+    resetTimer();
+
+    // Listeners for user interaction
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+    
+    // Use throttling to prevent excessive reset calls if needed, but a simple clear/set is fine.
+    const handleActivity = () => resetTimer();
+
+    events.forEach(event => document.addEventListener(event, handleActivity));
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => document.removeEventListener(event, handleActivity));
+    };
+  }, [authed, handleLogout]);
 
   if (!authed) {
     return <LoginPage onLogin={() => setAuthed(true)} />
@@ -181,9 +220,7 @@ function Dashboard({ onLogout, onUnauth }) {
           <div className="space-y-6">
             {[
               { id: 'dashboard', icon: <Layers className="w-5 h-5" /> },
-              { id: 'alerts', icon: <AlertTriangle className="w-5 h-5" /> },
               { id: 'map', icon: <Map className="w-5 h-5" /> },
-              { id: 'hunting', icon: <Crosshair className="w-5 h-5" /> },
               { id: 'settings', icon: <Settings className="w-5 h-5" /> },
             ].map(item => (
               <button
@@ -430,7 +467,15 @@ function Dashboard({ onLogout, onUnauth }) {
             <ThreatHunting onUnauth={onUnauth} />
           )}
 
-          {tab !== 'dashboard' && tab !== 'incidents' && tab !== 'alerts' && tab !== 'threat_intel' && tab !== 'hunt' && tab !== 'predictive_analysis' && (
+          {tab === 'reports' && (
+            <ReportGenerator onUnauth={onUnauth} />
+          )}
+
+          {tab === 'settings' && (
+            <SettingsView onUnauth={onUnauth} />
+          )}
+
+          {tab !== 'dashboard' && tab !== 'incidents' && tab !== 'alerts' && tab !== 'threat_intel' && tab !== 'hunt' && tab !== 'predictive_analysis' && tab !== 'reports' && tab !== 'settings' && (
             <div className="flex items-center justify-center h-full text-slate-500 text-sm uppercase tracking-widest font-bold">
               {tab} view under construction
             </div>

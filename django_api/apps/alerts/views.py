@@ -108,6 +108,22 @@ class AlertReportView(APIView):
                 headers={"Content-Disposition": r.headers.get("content-disposition", "")}
             )
 
+import socket
+
+def check_tcp(host, port, timeout=1):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+def check_host(host):
+    try:
+        socket.gethostbyname(host)
+        return True
+    except Exception:
+        return False
+
 class MLProxyView(APIView):
     def handle_request(self, request, path):
         url = f"{settings.ML_SERVICE_URL}/{path}"
@@ -127,8 +143,32 @@ class MLProxyView(APIView):
 
                 req = client.build_request(request.method, url, json=json_data)
                 r = client.send(req)
+                
+                if path == 'health':
+                    data = r.json() if r.status_code == 200 else {}
+                    data['es_connected'] = check_tcp('elasticsearch', 9200)
+                    data['kafka_connected'] = check_tcp('kafka', 9092)
+                    data['brain_connected'] = check_tcp('ngao_brain', 9000)
+                    data['wazuh_connected'] = check_host('wazuh_connector')
+                    data['fortisiem_connected'] = check_host('fortisiem_connector')
+                    data['umbrella_connected'] = check_host('umbrella_connector')
+                    data['django_connected'] = True
+                    data['status'] = 'ok' if r.status_code == 200 else 'error'
+                    return Response(data, status=200)
+
                 return Response(r.json(), status=r.status_code)
         except Exception as e:
+            if path == 'health':
+                return Response({
+                    "status": "error",
+                    "es_connected": check_tcp('elasticsearch', 9200),
+                    "kafka_connected": check_tcp('kafka', 9092),
+                    "brain_connected": check_tcp('ngao_brain', 9000),
+                    "wazuh_connected": check_host('wazuh_connector'),
+                    "fortisiem_connected": check_host('fortisiem_connector'),
+                    "umbrella_connected": check_host('umbrella_connector'),
+                    "django_connected": True
+                }, status=200)
             return Response({"error": str(e)}, status=500)
 
     def get(self, request, *args, **kwargs):

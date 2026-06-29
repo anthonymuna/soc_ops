@@ -1,10 +1,11 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, update_session_auth_hash
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import redirect
 from django.http import HttpResponse
+from rest_framework import status
 import os
 from .serializers import SOCUserSerializer
 
@@ -21,6 +22,28 @@ class UserMeView(APIView):
             request.user.save()
         serializer = SOCUserSerializer(request.user)
         return Response(serializer.data)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        current_password = request.data.get("current_password")
+        new_password = request.data.get("new_password")
+
+        if not current_password or not new_password:
+            return Response({"error": "Missing current or new password"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.check_password(current_password):
+            return Response({"error": "Incorrect current password"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save()
+        
+        # Keep user logged in by updating session hash
+        update_session_auth_hash(request, user)
+
+        return Response({"success": "Password updated successfully"})
 
 @csrf_exempt
 def admin_sso_form(request):

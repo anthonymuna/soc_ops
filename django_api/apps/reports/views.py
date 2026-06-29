@@ -64,6 +64,17 @@ class DailyReportListView(APIView):
                     "by_severity": {"terms": {"field": "ml_severity.keyword"}},
                     "by_class": {"terms": {"field": "ml_rf_class.keyword"}},
                     "by_event": {"terms": {"field": "event_type.keyword"}},
+                    "by_time": {
+                        "date_histogram": {
+                            "field": "ml_detected_at",
+                            "calendar_interval": "1h" if hours <= 48 else "1d",
+                            "min_doc_count": 0,
+                            "extended_bounds": {
+                                "min": since,
+                                "max": datetime.now(timezone.utc).isoformat()
+                            }
+                        }
+                    }
                 }
             })
             total_alerts = r["hits"]["total"]["value"] if isinstance(r["hits"]["total"], dict) else r["hits"]["total"]
@@ -71,11 +82,23 @@ class DailyReportListView(APIView):
             severities = {b["key"]: b["doc_count"] for b in aggs.get("by_severity", {}).get("buckets", [])}
             classes = {b["key"]: b["doc_count"] for b in aggs.get("by_class", {}).get("buckets", [])}
             events = {b["key"]: b["doc_count"] for b in aggs.get("by_event", {}).get("buckets", [])}
+            
+            # Build time series chart data
+            time_series = []
+            for b in aggs.get("by_time", {}).get("buckets", []):
+                time_series.append({"time": b["key_as_string"], "count": b["doc_count"]})
+                
+            chart_data = {
+                "time_series": time_series,
+                "severities": [{"name": k, "value": v} for k, v in severities.items()],
+                "classes": [{"name": k, "value": v} for k, v in classes.items()]
+            }
         except Exception:
             total_alerts = 0
             severities = {}
             classes = {}
             events = {}
+            chart_data = {}
 
         # 2. Fetch Threat Intel Stats
         enriched_profiles = ThreatActorProfile.objects.filter(enrichment_status="complete", is_whitelisted=False)
@@ -105,29 +128,25 @@ class DailyReportListView(APIView):
             f"- Log Baseline Anomalies: {deviations_count} unacknowledged anomalies ({volume_spikes} volume spikes)\n"
         )
 
-        system_prompt = (
-            "You are the Chief Information Security Officer (CISO) and Principal Incident Responder for NGAO SOC, "
-            "protecting critical enterprise networks across East Africa (Kenya, Uganda, Tanzania, Rwanda).\n\n"
-            "Generate a highly detailed, rigorous, and technical Executive Security Posture Report based on the provided stats.\n\n"
-            "CRITICAL WRITING RULES:\n"
-            "1. DO NOT write a generic or high-level summary. Use formal, professional cybersecurity terminology.\n"
-            "2. Avoid simple lists of numbers; instead, write deep analytical paragraphs explaining what the metrics indicate regarding attacker behavior and network risk.\n"
-            "3. Explicitly map observed behaviors to the MITRE ATT&CK framework (e.g. T1110 for Brute Force, T1021 for Lateral Movement, T1046 for port scanning).\n"
-            "4. In the Recommendations section, provide concrete, actionable security instructions (e.g. specific firewall rule changes, network segmentation configurations, SSH key rotation policies, multi-factor VPN setups, and Wazuh decoder/alert tuning rules).\n"
-            "5. Do not include conversational remarks, preambles, or postscripts. Start directly with the title.\n\n"
-            "FOLLOW THIS STRUCTURE EXACTLY:\n\n"
-            "# Executive Security Posture Report - [Insert Current Date]\n"
-            "## 1. Executive Summary & Posture Assessment\n"
-            "(Provide a comprehensive overview of the threat landscape, risk profile, and overall posture. Explain what the active metrics signify for the organization's business continuity.)\n\n"
-            "## 2. Ingest Telemetry & Incident Analysis\n"
-            "(Analyze the alert telemetry. Detail the anomalous alert categories [R2L, DoS, Probe, U2R] and severities. Discuss active threat campaigns and vector patterns.)\n\n"
-            "## 3. Threat Intelligence Profile & Active Adversaries\n"
-            "(Evaluate the enriched threat actor profiles, critical IP reputations, TOR nodes, anonymous proxies, and geo-origin distributions.)\n\n"
-            "## 4. Threat Hunting Baselines & Anomaly Deviations\n"
-            "(Analyze active hunt campaigns, findings, and unacknowledged deviations. Discuss log volume spikes, off-hours access, and unexpected ports/countries discovered during behavioral baselining.)\n\n"
-            "## 5. Strategic Recommendations & Technical Action Items\n"
-            "(Provide highly technical, concrete action items. Specify actual configuration parameters, rule changes, segmentation policies, and next steps for the security engineering team.)"
-        )
+        system_prompt = f"""
+You are an Elite Lead Security Architect and CISO analyzing recent security telemetry.
+
+{stats_summary}
+
+CRITICAL WRITING RULES:
+1. Write a highly professional, forensic-level security executive report. 
+2. Use sophisticated, authoritative cyber language (e.g. "We observed a statistically significant standard deviation in anomalous ingress patterns"). 
+3. DO NOT write like a generic AI or use phrases like "Certainly!" or "Here is the report."
+4. Start immediately with a "# 🛡️ NGAO SOC Executive Daily Briefing".
+5. Use markdown extensively: bolding, blockquotes for key findings, and horizontal rules to separate sections.
+6. The report MUST contain the following sections:
+    - **Executive Summary**: High-level impact and risk assessment.
+    - **Telemetry & Alert Analysis**: Deep dive into the numbers (correlate the stats above).
+    - **Threat Landscape Assessment**: Analyze the Threat Actor profiles and what they imply.
+    - **Hunt & Baseline Operations**: Discuss ongoing hunt campaigns and active baseline deviations.
+    - **Strategic Recommendations**: 3-5 actionable remediation steps.
+7. Be highly creative, making assumptions about specific TTPs (Tactics, Techniques, and Procedures) that might align with the stats to make the report feel grounded in reality.
+"""
 
         payload = {
             "model": QWEN_MODEL,
@@ -156,7 +175,8 @@ class DailyReportListView(APIView):
             title=f"Daily Executive Security Report ({hours}h window)",
             generated_by=request.user,
             content=report_content,
-            hours_covered=hours
+            hours_covered=hours,
+            chart_data=chart_data
         )
 
         serializer = DailyReportSerializer(report)
