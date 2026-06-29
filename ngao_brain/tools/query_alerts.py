@@ -8,10 +8,10 @@ ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
 es = Elasticsearch(ES_HOST)
 
 @tool
-def query_alerts(src_ip: str = None, agent_name: str = None, severity: str = None, mitre_id: str = None, event_type: str = None, minutes: int = 1440) -> str:
+def query_alerts(src_ip: str = None, agent_name: str = None, severity: str = None, mitre_id: str = None, event_type: str = None, minutes: int = 129600) -> str:
     """
     Query the Elasticsearch syndicate4-ml-alerts index for recent alerts.
-    Accepts: src_ip (optional), agent_name (optional), severity (optional), mitre_id (optional), event_type (optional), minutes (int, default 1440).
+    Accepts: src_ip (optional), agent_name (optional), severity (optional), mitre_id (optional), event_type (optional), minutes (int, default 129600).
     Returns list of alerts with fields: event_type, ml_severity, ml_rf_class, src_ip, dst_ip, agent_name, ml_detected_at, ml_explanation.
     """
     now = datetime.now(timezone.utc)
