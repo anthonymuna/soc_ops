@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'apps.reports',
     'apps.config',
     'apps.brain',
+    'apps.hunt',
 ]
 
 MIDDLEWARE = [

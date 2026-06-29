@@ -8,10 +8,10 @@ ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
 es = Elasticsearch(ES_HOST)
 
 @tool
-def query_alerts(src_ip: str = None, agent_name: str = None, severity: str = None, minutes: int = 60) -> str:
+def query_alerts(src_ip: str = None, agent_name: str = None, severity: str = None, mitre_id: str = None, event_type: str = None, minutes: int = 1440) -> str:
     """
     Query the Elasticsearch syndicate4-ml-alerts index for recent alerts.
-    Accepts: src_ip (optional), agent_name (optional), severity (optional), minutes (int, default 60).
+    Accepts: src_ip (optional), agent_name (optional), severity (optional), mitre_id (optional), event_type (optional), minutes (int, default 1440).
     Returns list of alerts with fields: event_type, ml_severity, ml_rf_class, src_ip, dst_ip, agent_name, ml_detected_at, ml_explanation.
     """
     now = datetime.now(timezone.utc)
@@ -21,12 +21,19 @@ def query_alerts(src_ip: str = None, agent_name: str = None, severity: str = Non
         {"range": {"ml_detected_at": {"gte": since}}}
     ]
     
-    if src_ip:
+    # Ignore fallback/unknown placeholders
+    ignore_vals = ("unknown", "n/a", "none", "null", "")
+    
+    if src_ip and src_ip.lower() not in ignore_vals:
         must_clauses.append({"term": {"src_ip.keyword": src_ip}})
-    if agent_name:
+    if agent_name and agent_name.lower() not in ignore_vals:
         must_clauses.append({"term": {"agent_name.keyword": agent_name}})
-    if severity:
+    if severity and severity.lower() not in ignore_vals:
         must_clauses.append({"term": {"ml_severity.keyword": severity}})
+    if mitre_id and mitre_id.lower() not in ignore_vals:
+        must_clauses.append({"term": {"mitre_id.keyword": mitre_id}})
+    if event_type and event_type.lower() not in ignore_vals:
+        must_clauses.append({"match": {"event_type": event_type}})
         
     query = {
         "query": {
@@ -46,6 +53,7 @@ def query_alerts(src_ip: str = None, agent_name: str = None, severity: str = Non
         for hit in hits:
             source = hit.get("_source", {})
             alerts.append({
+                "alert_id": hit.get("_id"),
                 "event_type": source.get("event_type"),
                 "ml_severity": source.get("ml_severity"),
                 "ml_rf_class": source.get("ml_rf_class"),

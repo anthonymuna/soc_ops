@@ -37,8 +37,9 @@ export function useSOC(refreshMs = 10000, onUnauth, selectedConnector, timeframe
       }
 
       const qs = selectedConnector ? `?connector=${encodeURIComponent(selectedConnector)}` : ''
-      const limit = (timeframe === 'today' || timeframe === 'yesterday') ? 1000 : 200
-      let alertQs = `?limit=${limit}&minutes=100800&timeframe=${encodeURIComponent(timeframe)}`
+      const limit = 1000
+      const minutes = timeframe === 'live' ? 1440 : 100800
+      let alertQs = `?limit=${limit}&minutes=${minutes}&timeframe=${encodeURIComponent(timeframe)}`
       if (selectedConnector) {
         alertQs += `&connector=${encodeURIComponent(selectedConnector)}`
       }

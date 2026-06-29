@@ -24,7 +24,7 @@ services:
     volumes:
       - esdata:/usr/share/elasticsearch/data
     ports:
-      - "127.0.0.1:9200:9200"
+      - "9200:9200"
     networks:
       - syndicate4
     restart: unless-stopped
@@ -39,7 +39,7 @@ services:
     image: docker.elastic.co/kibana/kibana:8.12.0
     container_name: syndicate4-kibana
     ports:
-      - "127.0.0.1:5601:5601"
+      - "5601:5601"
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - XPACK_SECURITY_ENABLED=false
@@ -110,7 +110,7 @@ services:
       - ./kafka/entrypoint.sh:/entrypoint.sh
     command: /entrypoint.sh
     ports:
-      - "127.0.0.1:9092:9092"
+      - "9092:9092"
     networks:
       - syndicate4
     restart: unless-stopped
@@ -178,7 +178,7 @@ services:
     build: ./ml_service
     container_name: syndicate4-ml
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
     environment:
       - ES_HOST=http://elasticsearch:9200
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
@@ -192,6 +192,7 @@ services:
       - WHITELISTED_IPS=${WHITELISTED_IPS:-127.0.0.1}
       - QWEN_API_URL=${QWEN_API_URL:-https://127.0.0.1/v1}
       - QWEN_API_KEY=${QWEN_API_KEY}
+      - QWEN_MODEL=${QWEN_MODEL}
     deploy:
       resources:
         limits:
@@ -217,7 +218,7 @@ services:
     build: ./django_api
     container_name: syndicate4-django
     ports:
-      - "127.0.0.1:8088:8080"
+      - "8088:8080"
     environment:
       - DATABASE_URL=postgres://syndicate4:${POSTGRES_PASSWORD}@postgres:5432/syndicate4
       - SECRET_KEY=${SECRET_KEY}
@@ -229,6 +230,11 @@ services:
       - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
       - QWEN_API_URL=${QWEN_API_URL:-https://127.0.0.1/v1}
       - QWEN_API_KEY=${QWEN_API_KEY}
+      - QWEN_MODEL=${QWEN_MODEL}
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+      - ENRICHMENT_TTL_HOURS=24
+      - DJANGO_SKIP_WORKER=0
     networks:
       - syndicate4
     depends_on:
@@ -244,7 +250,7 @@ services:
     build: ./responder
     container_name: syndicate4-responder
     ports:
-      - "127.0.0.1:8001:8001"
+      - "8001:8001"
     extra_hosts:
       - "host-gateway:host-gateway"
     environment:
@@ -256,6 +262,7 @@ services:
       - NEVER_BLOCK=${NEVER_BLOCK:-127.0.0.1}
       - QWEN_API_URL=${QWEN_API_URL:-https://127.0.0.1/v1}
       - QWEN_API_KEY=${QWEN_API_KEY}
+      - QWEN_MODEL=${QWEN_MODEL}
       - POLL_INTERVAL=10
       - DRY_RUN=${DRY_RUN:-true}
     networks:
@@ -275,7 +282,7 @@ services:
     build: ./ngao_brain
     container_name: syndicate4-brain
     ports:
-      - "127.0.0.1:9000:9000"
+      - "9000:9000"
     environment:
       - ES_HOST=http://elasticsearch:9200
       - DATABASE_URL=postgres://syndicate4:${POSTGRES_PASSWORD}@postgres:5432/syndicate4
@@ -284,7 +291,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - QWEN_BASE_URL=${QWEN_API_URL:-https://10.101.7.72/v1}
       - QWEN_API_KEY=${QWEN_API_KEY}
-      - QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct
+      - QWEN_MODEL=${QWEN_MODEL}
       - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-f9632032008466540b7b0af97829e049788d2671ce4e1bd6a4d09a628c580e927ba4b6a6f8328e31}
     networks:
       - syndicate4
@@ -311,7 +318,8 @@ services:
       target: build
     container_name: syndicate4-frontend
     ports:
-      - "127.0.0.1:80:3000"
+      - "3000:3000"
+      - "80:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules

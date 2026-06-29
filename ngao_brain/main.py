@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from elasticsearch import Elasticsearch
-from agent import get_agent_executor, QWEN_BASE_URL
+from agent import get_agent_executor, QWEN_BASE_URL, QWEN_API_KEY
 from prompts import CHAT_SYSTEM_PROMPT
 from triage import start_triage_consumer
 from tools.execute_action import execute_approved_action
@@ -128,7 +128,8 @@ def health():
     qwen_ok = False
     try:
         with httpx.Client(verify=False, timeout=3) as client:
-            res = client.get(f"{QWEN_BASE_URL}/models")
+            headers = {"Authorization": f"Bearer {QWEN_API_KEY}"} if QWEN_API_KEY else None
+            res = client.get(f"{QWEN_BASE_URL}/models", headers=headers)
             qwen_ok = (res.status_code == 200)
     except Exception:
         pass

@@ -22,6 +22,76 @@ export default function ChatPanel({ onUnauth }) {
     }
   }, [messages, isOpen])
 
+  useEffect(() => {
+    const handleInvestigate = async (e) => {
+      setIsOpen(true)
+      const msgText = e.detail.message
+      if (!msgText) return
+      
+      setInput('')
+      setError(null)
+      setLoading(true)
+      
+      const userMsg = { role: 'user', content: msgText }
+      setMessages(prev => [...prev, userMsg])
+      
+      const token = getToken()
+      if (!token) {
+        if (onUnauth) onUnauth()
+        setLoading(false)
+        return
+      }
+      
+      try {
+        const history = [...messages, userMsg].map(m => ({
+          role: m.role,
+          content: m.content
+        }))
+        
+        const resp = await fetch('/api/brain/chat/', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ message: msgText, history })
+        })
+        
+        if (resp.status === 401) {
+          if (onUnauth) onUnauth()
+          return
+        }
+        
+        const resData = await resp.json()
+        if (!resp.ok) {
+          throw new Error(resData.message || `Chat request failed: ${resp.statusText}`)
+        }
+        
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: resData.reply,
+            tool_calls: resData.tool_calls
+          }
+        ])
+      } catch (err) {
+        setError(err.message)
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: 'Sorry, I encountered an error while processing your request. Please try again.'
+          }
+        ])
+      } finally {
+        setLoading(false)
+      }
+    }
+    window.addEventListener('ai-investigate', handleInvestigate)
+    return () => window.removeEventListener('ai-investigate', handleInvestigate)
+  }, [messages, onUnauth])
+
   const handleSend = async (e) => {
     if (e) e.preventDefault()
     const msg = input.trim()

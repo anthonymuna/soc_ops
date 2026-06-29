@@ -78,17 +78,17 @@ case "${1:-deploy}" in
       -o ServerAliveInterval=30 \
       -o ServerAliveCountMax=3 \
       -N \
-      -L 3000:localhost:3000 \
+      -L 3000:localhost:80 \
       -L 5601:localhost:5601 \
       -L 8000:localhost:8000 \
-      -L 8080:localhost:8080 \
+      -L 8080:localhost:8088 \
       -L 8001:localhost:8001 \
       "${USER}@${SERVER}" 2>/dev/null || \
     ssh $SSH_OPTS -N \
-      -L 3000:localhost:3000 \
+      -L 3000:localhost:80 \
       -L 5601:localhost:5601 \
       -L 8000:localhost:8000 \
-      -L 8080:localhost:8080 \
+      -L 8080:localhost:8088 \
       -L 8001:localhost:8001 \
       "${USER}@${SERVER}"
     exit 0
@@ -160,8 +160,9 @@ echo "  ./deploy.sh --attach   # attach to server tmux"
 echo "  ./deploy.sh --status   # check service status"
 echo ""
 echo "After services start (~5 min):"
-echo "  Direct access (no tunnel needed):"
-echo "  Dashboard: http://${SERVER}:3000"
-echo "  Kibana:    http://${SERVER}:5601"
-echo "  ML API:    http://${SERVER}:8000/docs"
-echo "  Django API:http://${SERVER}:8080/api/"
+echo "  Access via SSH tunnel (recommended for hardened setup):"
+echo "    ./deploy.sh --tunnel"
+echo "    Dashboard: http://localhost:3000"
+echo "    Kibana:    http://localhost:5601"
+echo "    ML API:    http://localhost:8000/docs"
+echo "    Django API:http://localhost:8080/api/"

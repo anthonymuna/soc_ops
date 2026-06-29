@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -16,14 +18,14 @@
 }
 
 html.dark {
-  --soc-bg:     10 14 26;      /* #0a0e1a */
-  --soc-panel:  15 22 41;      /* #0f1629 */
-  --soc-border: 30 45 74;      /* #1e2d4a */
-  --soc-accent: 0 212 255;     /* #00d4ff */
-  --soc-green:  0 255 136;     /* #00ff88 */
-  --soc-red:    255 51 102;    /* #ff3366 */
-  --soc-yellow: 255 170 0;     /* #ffaa00 */
-  --soc-purple: 124 58 237;    /* #7c3aed */
+  --soc-bg:     15 23 42;      /* #0f172a (deep slate-gray) */
+  --soc-panel:  30 41 59;      /* #1e293b (slate-800) */
+  --soc-border: 51 65 85;      /* #334155 (slate-700) */
+  --soc-accent: 0 173 181;     /* #00adb5 (muted teal) */
+  --soc-green:  0 173 181;     /* #00adb5 (muted teal for system status) */
+  --soc-red:    255 46 99;     /* #ff2e63 (soft neon red) */
+  --soc-yellow: 249 211 66;    /* #f9d342 (amber warnings) */
+  --soc-purple: 139 92 246;    /* #8b5cf6 */
 }
 
 /* ── Base ──────────────────────────────────────────────────────── */
@@ -31,16 +33,44 @@ html.dark {
 
 body {
   background-color: rgb(var(--soc-bg));
-  color: #1e293b;
+  color: #f8fafc;
   font-family: 'Inter', system-ui, sans-serif;
   margin: 0;
   overflow-x: hidden;
   transition: background-color 0.2s, color 0.2s;
 }
 
-html.dark body { color: #e2e8f0; }
+html:not(.dark) body {
+  color: #0f172a;
+}
 
-/* ── Light mode text-* overrides (low-contrast 400 variants) ───── */
+/* ── Glassmorphism Panels ───────────────────────────────────────── */
+.glass-panel {
+  background: rgba(30, 41, 59, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html:not(.dark) .glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.05);
+}
+
+.glass-panel:hover {
+  border-color: rgba(0, 173, 181, 0.25);
+  box-shadow: 0 8px 32px 0 rgba(0, 173, 181, 0.08);
+}
+
+/* ── Font styles ────────────────────────────────────────────────── */
+.font-mono {
+  font-family: 'Roboto Mono', monospace !important;
+}
+
+/* ── Light mode overrides ───────────────────────────────────────── */
 html:not(.dark) .text-cyan-400   { color: #0284c7; }
 html:not(.dark) .text-cyan-700   { color: #0369a1; }
 html:not(.dark) .text-emerald-400 { color: #059669; }
@@ -54,31 +84,42 @@ html:not(.dark) .text-slate-500  { color: #6b7280; }
 html:not(.dark) .text-slate-600  { color: #9ca3af; }
 html:not(.dark) .text-slate-700  { color: #6b7280; }
 
-/* ── Light mode hover fixes ────────────────────────────────────── */
-html:not(.dark) .hover\:text-slate-300:hover { color: #1e293b; }
-html:not(.dark) .hover\:bg-white\/\[0\.02\]:hover { background-color: rgb(0 0 0 / 0.03); }
-
-/* ── Light mode panel depth ────────────────────────────────────── */
-html:not(.dark) .bg-soc-panel {
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
-}
-
 /* ── Scrollbar ─────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: rgb(var(--soc-bg)); }
-::-webkit-scrollbar-thumb { background: rgb(var(--soc-border)); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.3); border-radius: 2px; }
 
 /* ── Grid background ────────────────────────────────────────────── */
 .grid-bg {
   background-image:
-    linear-gradient(rgb(var(--soc-border) / 0.4) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--soc-border) / 0.4) 1px, transparent 1px);
-  background-size: 40px 40px;
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 50px 50px;
 }
 
-/* ── Animations ─────────────────────────────────────────────────── */
-@keyframes pulse-red {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.3); }
-  50%       { box-shadow: 0 0 0 6px rgba(225, 29, 72, 0); }
+html:not(.dark) .grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
 }
-.alert-critical { animation: pulse-red 2s infinite; }
+
+/* ── Glowing indicators ──────────────────────────────────────────── */
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 46, 99, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(255, 46, 99, 0); }
+}
+
+@keyframes pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(249, 211, 66, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(249, 211, 66, 0); }
+}
+
+@keyframes pulse-teal {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 173, 181, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(0, 173, 181, 0); }
+}
+
+.alert-critical-glow { animation: pulse-red 2.5s infinite; }
+.alert-high-glow { animation: pulse-amber 2.5s infinite; }
+.alert-teal-glow { animation: pulse-teal 2.5s infinite; }

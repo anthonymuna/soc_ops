@@ -1,38 +1,45 @@
-const TECHNIQUES = [
-  { id: 'T1046',     name: 'Net Scan',      tactic: 'Discovery' },
-  { id: 'T1018',     name: 'Remote Sys',    tactic: 'Discovery' },
-  { id: 'T1049',     name: 'Net Conns',     tactic: 'Discovery' },
-  { id: 'T1057',     name: 'Proc Disc',     tactic: 'Discovery' },
-  { id: 'T1082',     name: 'Sys Info',      tactic: 'Discovery' },
-  { id: 'T1083',     name: 'File Disc',     tactic: 'Discovery' },
-  { id: 'T1078',     name: 'Valid Accts',   tactic: 'Credential' },
-  { id: 'T1110',     name: 'Brute Force',   tactic: 'Credential' },
-  { id: 'T1110.001', name: 'Pwd Guess',     tactic: 'Credential' },
-  { id: 'T1021',     name: 'Remote Svc',    tactic: 'Lateral' },
-  { id: 'T1041',     name: 'Exfil C2',      tactic: 'Exfil' },
-  { id: 'T1071',     name: 'C2 Beacon',     tactic: 'C2' },
-  { id: 'T1105',     name: 'Tool Transfer', tactic: 'C2' },
-  { id: 'T1059',     name: 'Cmd Exec',      tactic: 'Execution' },
-  { id: 'T1068',     name: 'Priv Esc',      tactic: 'PrivEsc' },
-  { id: 'T1498',     name: 'Net DoS',       tactic: 'Impact' },
+import { useState } from 'react'
+import { Layers } from 'lucide-react'
+
+const TACTICS_MAP = [
+  { id: 'TA0001', name: 'Reconnaissance',     techniques: [{id:'T1595', name:'Active Scanning'}], theme: 'red' },
+  { id: 'TA0002', name: 'Resource Development', techniques: [{id:'T1583', name:'Acquire Infra'}, {id:'T1584', name:'Compromise Infra'}], theme: 'yellow' },
+  { id: 'TA0003', name: 'Initial Access',     techniques: [{id:'T1190', name:'Exploit Public'}], theme: 'red' },
+  { id: 'TA0004', name: 'Execution',          techniques: [{id:'T1059', name:'Command and Script'}], theme: 'blue' },
+  { id: 'TA0005', name: 'Persistence',        techniques: [{id:'T1098', name:'Account Manipulation'}], theme: 'blue' },
+  { id: 'TA0006', name: 'Lateral Movement',   techniques: [{id:'T1021', name:'Remote Services'}, {id:'T1080', name:'Taint Shared Content'}], theme: 'blue' },
+  { id: 'TA0007', name: 'Defense Evasion',    techniques: [{id:'T1140', name:'Deobfuscate'}], theme: 'blue' },
+  { id: 'TA0078', name: 'Exfiltration',       techniques: [{id:'T1041', name:'Exfil over C2'}], theme: 'muted' },
 ]
 
-const TACTIC_COLOR = {
-  Discovery:  'from-blue-100 to-blue-50 border-blue-200 dark:from-blue-900/60 dark:to-blue-800/40 dark:border-blue-700/30',
-  Credential: 'from-orange-100 to-orange-50 border-orange-200 dark:from-orange-900/60 dark:to-orange-800/40 dark:border-orange-700/30',
-  Lateral:    'from-purple-100 to-purple-50 border-purple-200 dark:from-purple-900/60 dark:to-purple-800/40 dark:border-purple-700/30',
-  Exfil:      'from-red-100 to-red-50 border-red-200 dark:from-red-900/60 dark:to-red-800/40 dark:border-red-700/30',
-  C2:         'from-rose-100 to-rose-50 border-rose-200 dark:from-rose-900/60 dark:to-rose-800/40 dark:border-rose-700/30',
-  Execution:  'from-yellow-100 to-yellow-50 border-yellow-200 dark:from-yellow-900/60 dark:to-yellow-800/40 dark:border-yellow-700/30',
-  PrivEsc:    'from-violet-100 to-violet-50 border-violet-200 dark:from-violet-900/60 dark:to-violet-800/40 dark:border-violet-700/30',
-  Impact:     'from-gray-100 to-gray-50 border-gray-300 dark:from-gray-900/60 dark:to-gray-800/40 dark:border-gray-600/30',
+// To match existing techniques to the mockup structure, we adapt our techniques:
+const OUR_TECHNIQUES = [
+  { id: 'T1046', name: 'Net Scan',       tacticId: 'TA0001' },
+  { id: 'T1018', name: 'Remote Sys',     tacticId: 'TA0001' },
+  { id: 'T1049', name: 'Net Conns',      tacticId: 'TA0001' },
+  { id: 'T1057', name: 'Proc Disc',      tacticId: 'TA0002' },
+  { id: 'T1082', name: 'Sys Info',       tacticId: 'TA0002' },
+  { id: 'T1083', name: 'File Disc',      tacticId: 'TA0002' },
+  { id: 'T1078', name: 'Valid Accts',    tacticId: 'TA0003' },
+  { id: 'T1110', name: 'Brute Force',    tacticId: 'TA0003' },
+  { id: 'T1110.001', name: 'Pwd Guess',  tacticId: 'TA0003' },
+  { id: 'T1021', name: 'Remote Svc',     tacticId: 'TA0006' },
+  { id: 'T1041', name: 'Exfil C2',       tacticId: 'TA0078' },
+  { id: 'T1071', name: 'C2 Beacon',      tacticId: 'TA0004' },
+  { id: 'T1105', name: 'Tool Transfer',  tacticId: 'TA0004' },
+  { id: 'T1059', name: 'Cmd Exec',       tacticId: 'TA0005' },
+  { id: 'T1068', name: 'Priv Esc',       tacticId: 'TA0005' },
+  { id: 'T1498', name: 'Net DoS',        tacticId: 'TA0007' },
+]
+
+const THEME_STYLES = {
+  red: 'bg-[#e11d48]/20 border-[#e11d48]/50 text-rose-100 hover:shadow-[0_0_15px_rgba(225,29,72,0.3)]',
+  yellow: 'bg-[#d97706]/20 border-[#d97706]/50 text-amber-100 hover:shadow-[0_0_15px_rgba(217,119,6,0.3)]',
+  blue: 'bg-[#0284c7]/20 border-[#0284c7]/50 text-sky-100 hover:shadow-[0_0_15px_rgba(2,132,199,0.3)]',
+  muted: 'bg-slate-700/20 border-slate-600/50 text-slate-300 hover:shadow-[0_0_15px_rgba(100,116,139,0.3)]'
 }
 
-import { useState } from 'react'
-
 export default function MitreHeatmap({ history, selectedMitreId, onSelectMitreId }) {
-  const [activeTactic, setActiveTactic] = useState(null)
-
   const counts = {}
   const evtMap = {
     port_scan: 'T1046', brute_force: 'T1110', lateral_movement: 'T1021.002',
@@ -63,84 +70,68 @@ export default function MitreHeatmap({ history, selectedMitreId, onSelectMitreId
     }
   }
 
-  const visibleTechniques = activeTactic
-    ? TECHNIQUES.filter(t => t.tactic === activeTactic)
-    : TECHNIQUES
-
-  const maxCount = Math.max(...Object.values(counts), 1)
+  // Populate dynamic techniques based on hits or defaults
+  const columns = TACTICS_MAP.map(tactic => {
+    const activeTechs = OUR_TECHNIQUES.filter(t => t.tacticId === tactic.id);
+    return {
+      ...tactic,
+      techniques: activeTechs.length > 0 ? activeTechs : tactic.techniques
+    }
+  });
 
   return (
-    <div className="bg-soc-panel border border-soc-border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-xs font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2">
-          MITRE ATT&CK Coverage
-          {selectedMitreId && (
-            <span className="text-[9px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/30">
-              Filter: {selectedMitreId}
-            </span>
-          )}
+    <div className="glass-panel p-5 flex flex-col h-full border-slate-800 rounded-xl relative overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-500/0 via-teal-400 to-teal-500/0 opacity-50"></div>
+      
+      <div className="flex items-center justify-between mb-6 border-b border-slate-800/40 pb-4">
+        <div className="text-xs font-semibold text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2">
+          <span>MITRE ATT&CK FRAMEWORK COVERAGE</span>
         </div>
-        {(activeTactic || selectedMitreId) && (
-          <button
-            onClick={() => {
-              setActiveTactic(null)
-              if (onSelectMitreId) onSelectMitreId(null)
-            }}
-            className="text-[10px] text-slate-500 hover:text-cyan-400 transition-colors"
-          >
-            clear all ×
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden relative">
+            <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-cyan-600 to-teal-400 w-[70%] drop-shadow-[0_0_8px_rgba(45,212,191,0.8)]"></div>
+          </div>
+          <span className="text-[10px] text-slate-400 font-mono">70% Covered</span>
+        </div>
       </div>
 
-      <div className="grid grid-cols-4 sm:grid-cols-7 lg:grid-cols-3 xl:grid-cols-4 gap-1.5">
-        {visibleTechniques.map(t => {
-          const count = counts[t.id] || 0
-          const heat = count / maxCount
-          const colors = TACTIC_COLOR[t.tactic] || TACTIC_COLOR.Discovery
-          const isSelected = selectedMitreId === t.id
-          
-          return (
-            <div
-              key={t.id}
-              title={`${t.id}: ${t.name} — ${count} hits`}
-              onClick={() => {
-                if (onSelectMitreId) {
-                  onSelectMitreId(isSelected ? null : t.id)
-                }
-              }}
-              className={`bg-gradient-to-br ${colors} border rounded p-1.5 text-center transition-all duration-300
-                cursor-pointer hover:brightness-125 hover:ring-1 hover:ring-white/30
-                ${isSelected ? 'ring-2 ring-cyan-400 scale-105 brightness-110 shadow-lg z-10 relative' : ''}`}
-              style={{ opacity: isSelected ? 1 : (count > 0 ? 0.8 + heat * 0.2 : 0.6) }}
-            >
-              <div className="text-[10px] font-bold text-slate-800 dark:text-slate-200">{t.id}</div>
-              <div className="text-[9px] font-semibold leading-tight mt-0.5 text-slate-700 dark:text-slate-300">{t.name}</div>
-              {count > 0 && (
-                <div className="text-[11px] font-black mt-1 text-slate-900 dark:text-white">{count}</div>
-              )}
+      <div className="grid grid-cols-8 gap-2 h-full">
+        {columns.map(tactic => (
+          <div key={tactic.id} className="flex flex-col h-full border border-slate-800/50 rounded-lg overflow-hidden bg-[#0c1322]">
+            <div className="text-center py-2 border-b border-slate-800/60 bg-slate-800/30">
+              <span className="text-[10px] font-mono text-slate-300">{tactic.id}</span>
             </div>
-          )
-        })}
-      </div>
-
-      <div className="flex gap-2 mt-3 flex-wrap">
-        {Object.entries(TACTIC_COLOR).map(([tactic, cls]) => {
-          const isActive = activeTactic === tactic
-          return (
-            <button
-              key={tactic}
-              onClick={() => setActiveTactic(isActive ? null : tactic)}
-              className={`text-[9px] px-1.5 py-0.5 rounded-sm bg-gradient-to-r ${cls} border
-                transition-all duration-150 cursor-pointer
-                ${isActive
-                  ? 'ring-1 ring-white/50 brightness-125 scale-105'
-                  : 'opacity-70 hover:opacity-100'}`}
-            >
-              {tactic}
-            </button>
-          )
-        })}
+            
+            <div className="p-2 space-y-2 flex-grow">
+              {tactic.techniques.map(t => {
+                const count = counts[t.id] || 0
+                const isSelected = selectedMitreId === t.id
+                const themeClass = THEME_STYLES[tactic.theme] || THEME_STYLES.muted;
+                const opacityClass = count > 0 || isSelected ? 'opacity-100' : 'opacity-40';
+                
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => {
+                      if (onSelectMitreId) onSelectMitreId(isSelected ? null : t.id)
+                    }}
+                    className={`flex flex-col p-2 rounded cursor-pointer border transition-all duration-300 ${themeClass} ${opacityClass} ${isSelected ? 'ring-2 ring-white shadow-lg opacity-100' : ''}`}
+                  >
+                    <span className="text-[10px] font-medium leading-tight mb-2 truncate">{t.name}</span>
+                    <div className="flex items-center justify-between mt-auto">
+                      <span className="text-[10px] font-mono opacity-80">{t.id}</span>
+                      {count > 0 && (
+                        <span className="text-[9px] font-bold bg-white/20 px-1 rounded animate-pulse">
+                          {count}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

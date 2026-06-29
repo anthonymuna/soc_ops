@@ -189,7 +189,7 @@ class PredictiveAnalysisView(APIView):
         )
 
         payload = {
-            "model": "Qwen/Qwen2.5-3B-Instruct",
+            "model": os.getenv("QWEN_MODEL", "qwen-military-advisor-q8_0_v2.gguf"),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
@@ -213,123 +213,241 @@ class PredictiveAnalysisView(APIView):
             return Response({"analysis": f"**API Validation Error**: Qwen rejected the payload.\n\n**Details:**\n`{err_text}`"})
         except Exception as e:
             return Response({"analysis": f"**System Error**: Failed to reach Qwen AI endpoint (`10.101.7.72`).\n\n**Details:**\n`{str(e)}`"})
-            
         return Response({"analysis": analysis})
 
 
 class ThreatIntelligenceView(APIView):
+    """
+    Reads pre-enriched ThreatActorProfile records from PostgreSQL.
+    ZERO live API calls — all enrichment happens in the background worker.
+    Fast, consistent, cacheable.
+    """
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        import json
-        import geoip2.webservice
-        import geoip2.errors
-        from datetime import datetime, timezone, timedelta
-        since = (datetime.now(timezone.utc) - timedelta(days=70)).isoformat()
-        
-        try:
-            resp = es.search(
-                index="syndicate4-ml-alerts",
-                body={
-                    "query": {"range": {"ml_detected_at": {"gte": since}}},
-                    "size": 100,
-                    "sort": [{"ml_detected_at": {"order": "desc"}}],
-                },
-            )
-            alerts = [h["_source"] for h in resp["hits"]["hits"]]
-        except NotFoundError:
-            alerts = []
+        from .models import ThreatActorProfile
+        from django.db.models import Count
 
-        if not alerts:
-            return Response({"intelligence": []})
+        threat_level = request.query_params.get("threat_level")
+        country_iso  = request.query_params.get("country")
+        min_score    = int(request.query_params.get("min_score", 0))
+        limit        = int(request.query_params.get("limit", 50))
 
-        # Group by IP
-        ip_data = {}
-        for a in alerts:
-            src = a.get('src_ip')
-            if not src or src in ("unknown", "0.0.0.0", ""):
-                continue
-            if src not in ip_data:
-                ip_data[src] = {"count": 0, "attack_classes": set(), "mitre_techniques": set()}
-            ip_data[src]["count"] += 1
-            ac = a.get("ml_rf_class")
-            if ac:
-                ip_data[src]["attack_classes"].add(ac)
-            mitre = a.get("mitre_techniques", [])
-            if isinstance(mitre, list):
-                for m in mitre:
-                    ip_data[src]["mitre_techniques"].add(m)
-
-        if not ip_data:
-            return Response({"intelligence": []})
-
-        import os
-        account_id = int(os.environ.get('MAXMIND_ACCOUNT_ID', '1363804'))
-        license_key = os.environ.get('MAXMIND_LICENSE_KEY', '')
-        
-        # Initialize GeoLite Client
-        geo_client = geoip2.webservice.Client(account_id, license_key, host='geolite.info')
-
-        prompt_lines = ["Assess the threat level for these source IPs. Return a JSON array ONLY.\n"]
-        for ip, d in ip_data.items():
-            location = "Unknown Location"
-            try:
-                response = geo_client.city(ip)
-                city = response.city.name
-                country = response.country.name
-                if city and country:
-                    location = f"{city}, {country}"
-                elif country:
-                    location = country
-            except geoip2.errors.GeoIP2Error:
-                pass
-            except Exception:
-                pass
-                
-            d['location'] = location
-
-            classes = list(d["attack_classes"])
-            mitre = list(d["mitre_techniques"])
-            prompt_lines.append(f"IP: {ip} | location: {location} | count: {d['count']} | attack_classes: {classes} | MITRE: {mitre}")
-
-        prompt = "\n".join(prompt_lines)
-        
-        system_prompt = (
-            "For each of these source IPs and their attack patterns, assess their "
-            "threat level (low/medium/high/critical), likely attacker type "
-            "(opportunistic/targeted/APT), and recommended defensive action. "
-            "MITRE techniques observed are listed. Reply as JSON array ONLY: "
-            "[{'ip':'...', 'location':'...', 'count':..., 'threat_level':'...', 'attacker_type':'...', "
-            "'mitre_techniques':[...], 'recommendation':'...'}]"
+        qs = ThreatActorProfile.objects.filter(
+            enrichment_status="complete",
+            is_whitelisted=False
         )
 
-        payload = {
-            "model": "Qwen/Qwen2.5-3B-Instruct",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 2000
+        if threat_level:
+            qs = qs.filter(threat_level=threat_level)
+        if country_iso:
+            qs = qs.filter(country_iso=country_iso)
+        if min_score > 0:
+            qs = qs.filter(abuse_score__gte=min_score)
+
+        qs = qs.order_by("-last_seen")[:limit]
+
+        profiles = []
+        for p in qs:
+            profiles.append({
+                # Identity
+                "ip":                   p.ip_address,
+                "threat_level":         p.threat_level,
+                "composite_score":      p.composite_threat_score,
+                "attacker_type":        p.attacker_type,
+                "campaign_name":        p.campaign_name,
+
+                # Geography
+                "location":             f"{p.city}, {p.country}" if p.city else p.country,
+                "country_iso":          p.country_iso,
+                "continent":            p.continent,
+                "latitude":             p.latitude,
+                "longitude":            p.longitude,
+
+                # Network
+                "asn":                  p.asn,
+                "asn_org":              p.asn_org,
+                "isp":                  p.isp,
+                "connection_type":      p.connection_type,
+                "is_tor":               p.is_tor_exit_node,
+                "is_proxy":             p.is_anonymous_proxy,
+                "is_hosting":           p.is_hosting_provider,
+
+                # External intel
+                "abuse_score":          p.abuse_score,
+                "abuse_reports":        p.abuse_total_reports,
+                "abuse_last_reported":  p.abuse_last_reported,
+                "vt_malicious":         p.vt_malicious_count,
+                "vt_suspicious":        p.vt_suspicious_count,
+
+                # Internal history
+                "first_seen":           p.first_seen,
+                "last_seen":            p.last_seen,
+                "total_events":         p.total_events,
+                "attack_classes":       p.attack_classes,
+                "mitre_techniques":     p.mitre_techniques,
+                "targeted_agents":      p.targeted_agents,
+                "connectors_seen":      p.connectors_seen,
+
+                # Qwen analysis
+                "threat_summary":       p.threat_summary,
+                "recommended_actions":  p.recommended_actions,
+                "analyst_notes":        p.analyst_notes,
+
+                # Meta
+                "is_blocked":           p.is_blocked,
+                "enriched_at":          p.updated_at,
+            })
+
+        # Summary stats for dashboard header
+        all_profiles = ThreatActorProfile.objects.filter(
+            enrichment_status="complete",
+            is_whitelisted=False
+        )
+        summary = {
+            "total_ips":      all_profiles.count(),
+            "critical_count": all_profiles.filter(threat_level="critical").count(),
+            "high_count":     all_profiles.filter(threat_level="high").count(),
+            "pending_count":  ThreatActorProfile.objects.filter(
+                                  enrichment_status__in=["pending","enriching"]).count(),
+            "top_countries":  list(
+                all_profiles.values("country_iso")
+                .annotate(count=Count("id"))
+                .order_by("-count")[:5]
+            ),
         }
-        
+
+        return Response({"intelligence": profiles, "summary": summary})
+
+class ThreatActorDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, ip):
+        from .models import ThreatActorProfile
         try:
-            with httpx.Client(verify=False) as client:
-                res = client.post(
-                    f"{QWEN_API_URL}/chat/completions",
-                    headers={"Authorization": f"Bearer {QWEN_API_KEY}"},
-                    json=payload,
-                    timeout=45
-                )
-                res.raise_for_status()
-                data = res.json()
-                content = data['choices'][0]['message']['content'].strip()
+            p = ThreatActorProfile.objects.get(ip_address=ip)
+            return Response({
+                "ip":                   p.ip_address,
+                "threat_level":         p.threat_level,
+                "composite_score":      p.composite_threat_score,
+                "attacker_type":        p.attacker_type,
+                "campaign_name":        p.campaign_name,
+                "location":             f"{p.city}, {p.country}" if p.city else p.country,
+                "city":                 p.city,
+                "country":              p.country,
+                "country_iso":          p.country_iso,
+                "continent":            p.continent,
+                "latitude":             p.latitude,
+                "longitude":            p.longitude,
+                "asn":                  p.asn,
+                "asn_org":              p.asn_org,
+                "isp":                  p.isp,
+                "connection_type":      p.connection_type,
+                "is_tor":               p.is_tor_exit_node,
+                "is_proxy":             p.is_anonymous_proxy,
+                "is_hosting":           p.is_hosting_provider,
+                "abuse_score":          p.abuse_score,
+                "abuse_reports":        p.abuse_total_reports,
+                "abuse_last_reported":  p.abuse_last_reported,
+                "vt_malicious":         p.vt_malicious_count,
+                "vt_suspicious":        p.vt_suspicious_count,
+                "first_seen":           p.first_seen,
+                "last_seen":            p.last_seen,
+                "total_events":         p.total_events,
+                "attack_classes":       p.attack_classes,
+                "mitre_techniques":     p.mitre_techniques,
+                "targeted_agents":      p.targeted_agents,
+                "connectors_seen":      p.connectors_seen,
+                "threat_summary":       p.threat_summary,
+                "recommended_actions":  p.recommended_actions,
+                "analyst_notes":        p.analyst_notes,
+                "is_blocked":           p.is_blocked,
+                "enriched_at":          p.updated_at,
+            })
+        except ThreatActorProfile.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+
+class WhitelistIPView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, ip):
+        from .models import ThreatActorProfile
+        try:
+            p = ThreatActorProfile.objects.get(ip_address=ip)
+            p.is_whitelisted = True
+            p.save()
+            return Response({"status": "success", "message": f"IP {ip} whitelisted."})
+        except ThreatActorProfile.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+
+class TriggerEnrichmentView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        ip = request.data.get("ip")
+        if not ip:
+            return Response({"error": "Missing IP parameter"}, status=400)
+        from .models import ThreatActorProfile
+        p, created = ThreatActorProfile.objects.get_or_create(ip_address=ip)
+        p.enrichment_status = "pending"
+        p.save()
+        
+        # Trigger enrichment in a separate thread so the HTTP call remains non-blocking
+        import threading
+        from .enrichment import enrich_maxmind, enrich_abuseipdb, enrich_virustotal, get_internal_history, analyze_with_qwen, MAXMIND_ID, MAXMIND_KEY
+        import geoip2.webservice
+        from django.utils import timezone as dj_tz
+        
+        def run_single_enrichment():
+            try:
+                p.enrichment_status = "enriching"
+                p.save()
+                mm_client = None
+                if MAXMIND_ID and MAXMIND_KEY:
+                    mm_client = geoip2.webservice.Client(MAXMIND_ID, MAXMIND_KEY, host="geolite.info")
+                if mm_client:
+                    mm_data = enrich_maxmind(p.ip_address, mm_client)
+                    for f, v in mm_data.items():
+                        setattr(p, f, v)
+                    p.maxmind_enriched_at = dj_tz.now()
+                ab_data = enrich_abuseipdb(p.ip_address)
+                for f, v in ab_data.items():
+                    if v is not None:
+                        setattr(p, f, v)
+                vt_data = enrich_virustotal(p.ip_address)
+                for f, v in vt_data.items():
+                    setattr(p, f, v)
+                hist = get_internal_history(p.ip_address)
+                for f, v in hist.items():
+                    if v is not None:
+                        setattr(p, f, v)
+                qwen_res = analyze_with_qwen(p)
+                if qwen_res:
+                    p.threat_level = qwen_res.get("threat_level", "unknown")
+                    p.attacker_type = qwen_res.get("attacker_type", "unknown")
+                    p.campaign_name = qwen_res.get("campaign_name", "")
+                    p.threat_summary = qwen_res.get("threat_summary", "")
+                    p.recommended_actions = qwen_res.get("recommended_actions", [])
+                    p.analyst_notes = qwen_res.get("analyst_notes", "")
+                    p.qwen_analyzed_at = dj_tz.now()
+                p.enrichment_status = "complete"
+                p.save()
+            except Exception as e:
+                p.enrichment_status = "failed"
+                p.save()
                 
-                if content.startswith("```json"):
-                    content = content[7:]
-                elif content.startswith("```"):
-                    content = content[3:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                    
-                intelligence_array = json.loads(content.strip())
-                return Response({"intelligence": intelligence_array})
-        except Exception as e:
-            return Response({"intelligence": [{"ip": "ERROR", "count": 0, "threat_level": "Critical", "attacker_type": "System Error", "mitre_techniques": ["Network Failure"], "recommendation": f"Failed to reach Qwen AI endpoint (10.101.7.72). Details: {str(e)}"}]})
+        threading.Thread(target=run_single_enrichment, daemon=True).start()
+        return Response({"status": "success", "message": f"Enrichment triggered for {ip}."})
+
+class ThreatIntelStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from .models import ThreatActorProfile
+        all_profiles = ThreatActorProfile.objects.filter(is_whitelisted=False)
+        return Response({
+            "total_ips": all_profiles.count(),
+            "critical_count": all_profiles.filter(threat_level="critical").count(),
+            "high_count": all_profiles.filter(threat_level="high").count(),
+            "pending_count": ThreatActorProfile.objects.filter(enrichment_status__in=["pending", "enriching"]).count()
+        })

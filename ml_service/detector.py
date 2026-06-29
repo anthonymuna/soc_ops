@@ -37,6 +37,7 @@ logger = logging.getLogger("detector")
 
 QWEN_API_URL = os.getenv("QWEN_API_URL", "https://localhost/v1").rstrip('/')
 QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen-military-advisor-q8_0_v2.gguf")
 
 NSL_KDD_COLS = [
     "duration", "protocol_type", "service", "flag", "src_bytes", "dst_bytes",
@@ -378,7 +379,8 @@ class QwenClassifier:
             try:
                 logger.info("Pinging Qwen model endpoint...")
                 with httpx.Client(verify=False, timeout=5) as client:
-                    res = client.get(f"{QWEN_API_URL}/models")
+                    headers = {"Authorization": f"Bearer {QWEN_API_KEY}"} if QWEN_API_KEY else None
+                    res = client.get(f"{QWEN_API_URL}/models", headers=headers)
                 if res.status_code == 200:
                     self._available = True
                     logger.info("Qwen classifier ready")
@@ -414,7 +416,7 @@ class QwenClassifier:
             for text in texts:
                 try:
                     payload = {
-                        "model": "Qwen/Qwen2.5-3B-Instruct",
+                        "model": QWEN_MODEL,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": text}
@@ -466,7 +468,8 @@ class QwenNarrator:
         def _target():
             try:
                 with httpx.Client(verify=False, timeout=5) as client:
-                    res = client.get(f"{QWEN_API_URL}/models")
+                    headers = {"Authorization": f"Bearer {QWEN_API_KEY}"} if QWEN_API_KEY else None
+                    res = client.get(f"{QWEN_API_URL}/models", headers=headers)
                 if res.status_code == 200:
                     self._available = True
                 else:
@@ -497,7 +500,7 @@ class QwenNarrator:
         try:
             with httpx.Client(verify=False, timeout=10) as client:
                 payload = {
-                    "model": "Qwen/Qwen2.5-3B-Instruct",
+                    "model": QWEN_MODEL,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": json.dumps(alert)}

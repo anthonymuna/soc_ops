@@ -181,7 +181,7 @@ def _qwen_should_block(alert: dict) -> bool:
         }
         
         payload = {
-            "model": "Qwen/Qwen2.5-3B-Instruct",
+            "model": os.getenv("QWEN_MODEL", "qwen-military-advisor-q8_0_v2.gguf"),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(prompt_data)}

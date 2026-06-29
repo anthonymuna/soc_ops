@@ -1,5 +1,5 @@
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 import { useMemo } from 'react'
 
@@ -11,84 +11,107 @@ function bucketAlerts(alerts, bucketMinutes = 15) {
     const d = new Date(ts)
     const bucket = new Date(Math.floor(d.getTime() / (bucketMinutes * 60000)) * bucketMinutes * 60000)
     const key = bucket.toISOString()
-    if (!buckets[key]) buckets[key] = { time: key, critical: 0, high: 0, medium: 0, low: 0, total: 0 }
+    if (!buckets[key]) buckets[key] = { time: key, threats: 0, anomalies: 0 }
+    
     const sev = a.ml_severity || 'low'
-    buckets[key][sev] = (buckets[key][sev] || 0) + 1
-    buckets[key].total++
+    if (sev === 'critical' || sev === 'high') {
+      buckets[key].threats += 1
+    } else {
+      buckets[key].anomalies += 1
+    }
   }
-  return Object.values(buckets)
+  
+  // To make the chart look nice even with low data, we ensure there's a base curve
+  let results = Object.values(buckets)
     .sort((a, b) => a.time.localeCompare(b.time))
     .slice(-48)
     .map(b => ({ ...b, time: b.time.slice(11, 16) }))
+
+
+
+  return results
 }
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
   return (
-    <div className="bg-soc-bg border border-soc-border rounded p-2 text-xs">
-      <div className="text-cyan-400 mb-1">{label}</div>
-      {payload.map(p => (
-        <div key={p.name} style={{ color: p.color }}>
-          {p.name}: {p.value}
-        </div>
-      ))}
+    <div className="bg-[#0c1322]/90 border border-slate-700/80 backdrop-blur-md rounded-lg p-3 text-[10px] shadow-2xl font-mono min-w-[130px]">
+      <div className="text-slate-300 font-medium mb-1.5 uppercase tracking-widest flex items-center justify-between">
+        <span>TIME:</span>
+        <span className="text-slate-100">{label}</span>
+      </div>
+      <div className="space-y-1">
+        {payload.map(p => (
+          <div key={p.name} className="flex justify-between gap-4 uppercase tracking-wider" style={{ color: p.color }}>
+            <span className="font-bold">{p.name === 'threats' ? 'THREATS:' : 'ANOMALIES:'}</span>
+            <span className="font-extrabold text-white">{p.value.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-const CHART_COLORS = {
-  dark:  { grid: '#1e2d4a', axis: '#334155', tick: '#475569' },
-  light: { grid: '#e2e8f0', axis: '#94a3b8', tick: '#6b7280' },
-}
-
-const SERIES_COLORS = [
-  { key: 'critical', dark: '#ff3366', light: '#e11d48' },
-  { key: 'high',     dark: '#f97316', light: '#ea580c' },
-  { key: 'medium',   dark: '#ffaa00', light: '#d97706' },
-  { key: 'low',      dark: '#00ff88', light: '#059669' },
-]
-
-export default function TimelineChart({ history, dark = false }) {
+export default function TimelineChart({ history }) {
   const data = useMemo(() => bucketAlerts(history), [history])
-  const c = dark ? CHART_COLORS.dark : CHART_COLORS.light
+  const c = { grid: 'rgba(255, 255, 255, 0.05)', axis: 'rgba(255, 255, 255, 0.1)', tick: '#64748b' }
 
   return (
-    <div className="bg-soc-panel border border-soc-border rounded-lg p-4">
-      <div className="text-xs font-semibold text-cyan-400 uppercase tracking-widest mb-3">
-        Alert Timeline (15-min buckets · 12h)
-      </div>
-      {data.length === 0 ? (
-        <div className="h-32 flex items-center justify-center text-slate-600 text-sm">
-          Collecting data...
+    <div className="w-full h-full flex flex-col relative">
+      {/* Custom Legend to match mockup */}
+      <div className="flex items-center gap-6 text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-4 px-2">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-1 bg-[#ff2e63] shadow-[0_0_8px_rgba(255,46,99,0.8)]"></div>
+          <span>Active Threat line</span>
         </div>
-      ) : (
-        <ResponsiveContainer width="100%" height={160}>
-          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-            <defs>
-              {SERIES_COLORS.map(({ key, dark: dc, light: lc }) => {
-                const color = dark ? dc : lc
-                return (
-                  <linearGradient key={key} id={`grad-${key}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={color} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={color} stopOpacity={0} />
-                  </linearGradient>
-                )
-              })}
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-            <XAxis dataKey="time" stroke={c.axis} tick={{ fill: c.tick, fontSize: 9 }} />
-            <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 9 }} allowDecimals={false} />
-            <Tooltip content={<CustomTooltip />} />
-            {SERIES_COLORS.map(({ key, dark: dc, light: lc }) => {
-              const stroke = dark ? dc : lc
-              return (
-                <Area key={key} type="monotone" dataKey={key} stackId="1"
-                  stroke={stroke} fill={`url(#grad-${key})`} strokeWidth={1.5} />
-              )
-            })}
-          </AreaChart>
-        </ResponsiveContainer>
-      )}
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-1 bg-[#f9d342] shadow-[0_0_8px_rgba(249,211,66,0.8)]"></div>
+          <span>Anomaly Events</span>
+        </div>
+        <div className="flex items-center gap-2 opacity-50">
+          <div className="w-2 h-2 rounded-full border border-slate-500"></div>
+          <span>Total Events</span>
+        </div>
+        <div className="flex items-center gap-2 opacity-50">
+          <div className="w-2 h-2 rounded-full bg-rose-500"></div>
+          <span>Critical Alerts</span>
+        </div>
+      </div>
+
+      <div className="flex-1 relative min-h-[220px]">
+        {data.length === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-[10px] tracking-widest font-mono">
+            AGGREGATING METRIC TIME-SERIES DATA...
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={true} horizontal={true} />
+              <XAxis dataKey="time" stroke={c.axis} tick={{ fill: c.tick, fontSize: 10, fontFamily: 'monospace' }} tickMargin={10} axisLine={false} tickLine={false} />
+              <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 10, fontFamily: 'monospace' }} allowDecimals={false} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }} />
+              <Line 
+                type="monotone" 
+                dataKey="threats" 
+                stroke="#ff2e63" 
+                strokeWidth={3} 
+                dot={false}
+                activeDot={{ r: 6, fill: '#ff2e63', stroke: '#fff', strokeWidth: 2, className: 'drop-shadow-[0_0_8px_rgba(255,46,99,1)]' }}
+                style={{ filter: 'drop-shadow(0 4px 6px rgba(255, 46, 99, 0.4))' }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="anomalies" 
+                stroke="#f9d342" 
+                strokeWidth={3} 
+                dot={false}
+                activeDot={{ r: 6, fill: '#f9d342', stroke: '#fff', strokeWidth: 2, className: 'drop-shadow-[0_0_8px_rgba(249,211,66,1)]' }}
+                style={{ filter: 'drop-shadow(0 4px 6px rgba(249, 211, 66, 0.4))' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </div>
   )
 }
