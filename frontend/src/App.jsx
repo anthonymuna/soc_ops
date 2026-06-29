@@ -17,6 +17,7 @@ import ThreatHunting from './components/ThreatHunting'
 import PredictiveAnalysis from './components/PredictiveAnalysis'
 import ReportGenerator from './components/ReportGenerator'
 import SettingsView from './components/Settings'
+import ThreatMap from './components/ThreatMap'
 
 const CONNECTORS = [
   { id: 'wazuh', label: 'Wazuh' },
@@ -471,11 +472,15 @@ function Dashboard({ onLogout, onUnauth }) {
             <ReportGenerator onUnauth={onUnauth} />
           )}
 
+          {tab === 'map' && (
+            <ThreatMap />
+          )}
+
           {tab === 'settings' && (
             <SettingsView onUnauth={onUnauth} />
           )}
 
-          {tab !== 'dashboard' && tab !== 'incidents' && tab !== 'alerts' && tab !== 'threat_intel' && tab !== 'hunt' && tab !== 'predictive_analysis' && tab !== 'reports' && tab !== 'settings' && (
+          {tab !== 'dashboard' && tab !== 'incidents' && tab !== 'map' && tab !== 'alerts' && tab !== 'threat_intel' && tab !== 'hunt' && tab !== 'predictive_analysis' && tab !== 'reports' && tab !== 'settings' && (
             <div className="flex items-center justify-center h-full text-slate-500 text-sm uppercase tracking-widest font-bold">
               {tab} view under construction
             </div>

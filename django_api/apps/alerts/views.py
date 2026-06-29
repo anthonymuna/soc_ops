@@ -491,3 +491,35 @@ class ThreatIntelStatsView(APIView):
             "high_count": all_profiles.filter(threat_level="high").count(),
             "pending_count": ThreatActorProfile.objects.filter(enrichment_status__in=["pending", "enriching"]).count()
         })
+
+from .feeds import get_threat_advisories
+
+class AdvisoryFeedView(APIView):
+    def get(self, request):
+        try:
+            advisories = get_threat_advisories()
+            return Response({"advisories": advisories})
+        except Exception as e:
+            logger.error(f"Failed to fetch advisories: {e}")
+            return Response({"error": "Failed to fetch advisories"}, status=500)
+
+import hashlib
+from datetime import datetime, timezone, timedelta
+
+def get_kenya_coords(agent_name):
+    # Deterministic coords within Kenya: Lat -4 to +4, Lng 34 to 41
+    hash_val = int(hashlib.sha256(str(agent_name).encode('utf-8')).hexdigest(), 16)
+    lat = -4.0 + ((hash_val % 1000) / 1000.0) * 8.0
+    lng = 34.0 + (((hash_val // 1000) % 1000) / 1000.0) * 7.0
+    return [lat, lng]
+
+from .osint_scraper import scrape_osint_map_data
+
+class MapDataView(APIView):
+    def get(self, request):
+        try:
+            data = scrape_osint_map_data()
+            return Response(data)
+        except Exception as e:
+            logger.error(f"Failed to fetch OSINT map data: {e}")
+            return Response({"agents": [], "vectors": []})
