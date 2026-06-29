@@ -111,7 +111,7 @@ export default function TriageQueue({ onUnauth }) {
         <div className="flex items-center gap-2">
           <ShieldAlert className="w-5 h-5 text-cyan-400 animate-pulse" />
           <h2 className="text-sm font-bold text-cyan-400 uppercase tracking-widest">
-            AI Triage & HitL Queue
+            Threat Review Desk
           </h2>
           {pendingCount > 0 && (
             <span className="bg-rose-500/20 text-rose-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-500/30">
